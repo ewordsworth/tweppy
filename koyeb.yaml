@@ -1,0 +1,30 @@
+name: twitter-bot-webapp
+services:
+  - name: webapp
+    type: web
+    build:
+      type: buildpack
+    instance_type: nano
+    ports:
+      - port: 5000
+        protocol: http
+    env:
+      - key: CF_ACCOUNT_ID
+        scope: project
+      - key: CF_D1_DATABASE_ID
+        scope: project
+      - key: CF_API_TOKEN
+        scope: project
+      - key: CLIENT_ID
+        scope: project
+      - key: CLIENT_SECRET
+        scope: project
+      - key: REDIRECT_URI
+        scope: project
+    health_check:
+      http:
+        path: /
+        port: 5000
+    scaling:
+      min: 1
+      max: 1

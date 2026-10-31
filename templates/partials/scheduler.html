@@ -1,0 +1,82 @@
+<!-- Scheduler Tab -->
+<div id="scheduler-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Scheduler</h1>
+            <p class="page-subtitle">Times are shown and entered in your browser's local time. Scheduled posts ignore quiet hours.</p>
+        </div>
+    </header>
+
+    <div class="dashboard-left-right-container scheduler-layout">
+        <div class="dashboard-left">
+            <div class="card calendar-card">
+                <div class="calendar-head">
+                    <h2 id="cal-title"><i class="fa-solid fa-calendar-days"></i> <span></span></h2>
+                    <div class="calendar-nav">
+                        <button type="button" class="btn btn-secondary btn-small" id="cal-prev" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button type="button" class="btn btn-secondary btn-small" id="cal-today">Today</button>
+                        <button type="button" class="btn btn-secondary btn-small" id="cal-next" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+                <div class="calendar-legend">
+                    <span><span class="cal-dot upcoming"></span> Upcoming</span>
+                    <span><span class="cal-dot posted"></span> Posted</span>
+                </div>
+                <div id="calendar" class="calendar-grid" role="grid" aria-label="Scheduled posts by day"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2 id="day-title"><i class="fa-regular fa-calendar"></i> <span>Pick a day</span></h2>
+                    <button type="button" class="btn btn-primary btn-small" id="day-schedule-btn"><i class="fa-solid fa-plus"></i> Schedule on this day</button>
+                </div>
+                <div id="day-list" class="tweet-queue-container day-list"></div>
+            </div>
+        </div>
+
+        <div class="dashboard-right">
+            <div class="card">
+                <h2><i class="fa-regular fa-clock"></i> Schedule one post</h2>
+                <form action="{{ url_for('schedule') }}" method="POST" class="stacked-form js-utc-form">
+                    <label for="sched-one-text">Tweet</label>
+                    <textarea id="sched-one-text" name="scheduled_text" rows="4" required data-preview="sched-one-preview" data-single="1" placeholder="What should go out?"></textarea>
+                    <div id="sched-one-preview" class="tweet-preview"></div>
+                    <label for="sched-one-at">Post at</label>
+                    <input id="sched-one-at" name="scheduled_at" type="datetime-local" required data-utc-target="sched-one-at-utc" data-default-offset="10" />
+                    <input type="hidden" id="sched-one-at-utc" name="scheduled_at_utc" />
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Schedule</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-layer-group"></i> Bulk schedule</h2>
+                <p class="hint">Paste several tweets in [square brackets]. They go out one after another, starting at the time you pick.</p>
+                <form action="{{ url_for('schedule_bulk') }}" method="POST" class="stacked-form js-utc-form">
+                    <label for="bulk-input">Tweets</label>
+                    <textarea id="bulk-input" name="bulk_input" rows="5" required data-preview="bulk-preview" placeholder="[First tweet] [Second tweet] [Third tweet]"></textarea>
+                    <div id="bulk-preview" class="tweet-preview"></div>
+                    <div class="form-row">
+                        <div>
+                            <label for="bulk-start">Start at</label>
+                            <input id="bulk-start" name="start_at" type="datetime-local" required data-utc-target="bulk-start-utc" data-default-offset="30" />
+                            <input type="hidden" id="bulk-start-utc" name="start_at_utc" />
+                        </div>
+                        <div>
+                            <label for="bulk-every">Space them</label>
+                            <select id="bulk-every" name="every_minutes">
+                                {% for minutes, label in interval_choices %}
+                                <option value="{{ minutes }}" {% if minutes|string == settings.post_interval_minutes %}selected{% endif %}>Every {{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Schedule all</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

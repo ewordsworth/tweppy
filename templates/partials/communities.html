@@ -1,0 +1,179 @@
+<!-- Communities Tab -->
+<div id="communities-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Communities</h1>
+            <p class="page-subtitle">Post into an X Community{% if settings.retweet_community_posts == '1' %} and retweet each post to your profile{% endif %}.</p>
+        </div>
+    </header>
+
+    <div id="communities-layout" class="dashboard-left-right-container">
+        <div class="dashboard-left">
+            <div class="card community-management-card">
+                <h2><i class="fa-solid fa-users-gear"></i> Manage Community</h2>
+                <div class="active-community-display">
+                    <span>Active community:</span>
+                    {% if active_community %}
+                        <span class="dot online"></span>
+                        <strong>{{ active_community.name }}</strong>
+                        <span class="muted">({{ active_community.id }})</span>
+                    {% else %}
+                        <span class="dot offline"></span>
+                        <strong>None</strong>
+                    {% endif %}
+                </div>
+                <form id="community-form" action="{{ url_for('set_active_community') }}" method="post" class="stacked-form">
+                    <div class="form-row">
+                        <div>
+                            <label for="community-id-input">Community ID</label>
+                            <input id="community-id-input" name="community_id" inputmode="numeric" placeholder="e.g. 1234567890123456789" value="{{ active_community.id if active_community else '' }}" required />
+                        </div>
+                        <div>
+                            <label for="community-name-input">Name (optional)</label>
+                            <input id="community-name-input" name="community_name" placeholder="e.g. Awesome Devs" value="{{ active_community.name if active_community else '' }}" />
+                        </div>
+                    </div>
+                    <p class="hint">The ID is the long number in the community's URL: x.com/i/communities/<strong>ID</strong>.</p>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save &amp; set active</button>
+                    </div>
+                </form>
+
+                <div class="saved-communities-list">
+                    <h3>Saved communities</h3>
+                    {% if communities %}
+                        <ul>
+                        {% for community in communities %}
+                            <li class="community-item {% if active_community and active_community.id == community.id %}active{% endif %}">
+                                <span>{{ community.name }} <span class="muted">· {{ community.queued }} queued</span></span>
+                                <div class="header-actions">
+                                    {% if not (active_community and active_community.id == community.id) %}
+                                    <form action="{{ url_for('set_active_community') }}" method="post">
+                                        <input type="hidden" name="community_id" value="{{ community.id }}">
+                                        <button type="submit" class="btn btn-secondary btn-small">Activate</button>
+                                    </form>
+                                    {% endif %}
+                                    <form action="{{ url_for('delete_community', community_id=community.id) }}" method="post"
+                                          onsubmit="return confirm('Remove this community and its queued tweets?');">
+                                        <button type="submit" class="btn btn-ghost-danger btn-small btn-icon" title="Remove community"><i class="fa-solid fa-trash"></i></button>
+                                    </form>
+                                </div>
+                            </li>
+                        {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="empty-message">No communities saved yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if active_community %}
+            <div class="card tweet-form-card">
+                <h2><i class="fa-solid fa-pen-to-square"></i> Add to {{ active_community.name }}</h2>
+                <form action="{{ url_for('add_community_tweets') }}" method="post">
+                    <textarea id="community-tweet-input" name="community_tweets_input" rows="4" data-preview="community-preview"
+                              placeholder='[A new community tweet...] [And another...]'></textarea>
+                    <div id="community-preview" class="tweet-preview"></div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Add to Queue</button>
+                    </div>
+                </form>
+            </div>
+            {% endif %}
+
+            <div class="card actions-card">
+                <h2><i class="fa-solid fa-bolt"></i> Community Actions</h2>
+                <div class="action-row">
+                    {% if community_posting_active %}
+                    <form action="{{ url_for('stop_community_auto_posting') }}" method="POST">
+                        <button type="submit" class="btn btn-warning"><i class="fa-solid fa-pause"></i> Pause Auto Post</button>
+                    </form>
+                    {% else %}
+                    <form action="{{ url_for('start_community_auto_post') }}" method="POST">
+                        <button type="submit" class="btn btn-success" {% if not active_community %}disabled{% endif %}><i class="fa-solid fa-play"></i> Start Auto Post</button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ url_for('post_next_community') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary" {% if not community_queue %}disabled{% endif %}><i class="fa-solid fa-forward"></i> Post Next</button>
+                    </form>
+                </div>
+                <div class="status-indicator">
+                    {% if community_worker.active %}
+                        <span class="dot online"></span>
+                        <span>{{ community_worker.state }}{% if community_worker.community_name %} · {{ community_worker.community_name }}{% endif %}</span>
+                        {% if community_worker.next_at %}
+                        <span class="muted">· next <span class="ts" data-iso="{{ community_worker.next_at }}" data-format="time"></span>
+                        <span class="countdown" data-until="{{ community_worker.next_at }}"></span></span>
+                        {% endif %}
+                    {% else %}
+                        <span class="dot offline"></span> <span>Auto-post off · every {{ community_worker.interval }} when on</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-right">
+            <div class="card tabbed-card">
+                <div class="card-tabs" role="tablist">
+                    <button class="card-tab-link active" data-tab="community-queue-tab"><i class="fa-solid fa-list-check"></i> Queue ({{ community_queue|length }})</button>
+                    <button class="card-tab-link" data-tab="community-history-tab"><i class="fa-solid fa-clock-rotate-left"></i> History ({{ community_post_history|length }})</button>
+                </div>
+
+                <div id="community-queue-tab" class="card-tab-content active">
+                    <div class="card-header">
+                        <h3>Community Queue</h3>
+                        {% if community_queue %}
+                        <form action="{{ url_for('clear_community_queue') }}" method="POST" onsubmit="return confirm('Clear all tweets in the community queue?');">
+                            <button type="submit" class="btn btn-danger btn-small">Clear All</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    <div class="card-content tweet-queue-container">
+                        {% for tweet in community_queue %}
+                        <div class="tweet-item">
+                            <div class="tweet-body">
+                                <p>{{ tweet.text }}</p>
+                                <span class="tweet-meta js-char-count"></span>
+                            </div>
+                            <div class="fab-container">
+                                <button type="button" class="fab-main" aria-label="Tweet actions"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                                <div class="fab-actions">
+                                    <form action="{{ url_for('post_specific_community_tweet', tweet_id=tweet.id) }}" method="POST">
+                                        <button type="submit" class="btn btn-primary btn-small btn-icon" title="Post Now"><i class="fa-solid fa-paper-plane"></i></button>
+                                    </form>
+                                    <button type="button" class="btn btn-secondary btn-small btn-icon js-edit-tweet"
+                                            data-action="{{ url_for('update_community_tweet', tweet_id=tweet.id) }}"
+                                            data-text="{{ tweet.text }}" title="Edit Tweet"><i class="fa-solid fa-pencil"></i></button>
+                                    <form action="{{ url_for('delete_community_tweet', tweet_id=tweet.id) }}" method="POST" onsubmit="return confirm('Delete this community tweet?');">
+                                        <button type="submit" class="btn btn-danger btn-small btn-icon" title="Delete Tweet"><i class="fa-solid fa-trash"></i></button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <p class="empty-message">{% if active_community %}No tweets in the community queue.{% else %}Set an active community to see its queue.{% endif %}</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div id="community-history-tab" class="card-tab-content">
+                    <div class="card-header">
+                        <h3>Community Post History</h3>
+                    </div>
+                    <div class="card-content">
+                        {% for post in community_post_history %}
+                        <div class="history-item">
+                            <div class="history-meta">
+                                <span class="timestamp ts" data-iso="{{ post.posted_at.isoformat() }}"></span>
+                            </div>
+                            <p>{{ post.text }}</p>
+                        </div>
+                        {% else %}
+                        <p class="empty-message">No posts in community history.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

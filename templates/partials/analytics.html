@@ -1,0 +1,104 @@
+<!-- Analytics Tab -->
+<div id="analytics-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Analytics</h1>
+            <p class="page-subtitle">Last 30 days, grouped by day in {{ analytics.timezone }}.</p>
+        </div>
+    </header>
+
+    <div class="kpi-grid">
+        <div class="kpi kpi-hero">
+            <span class="kpi-label">Posts in the last 30 days</span>
+            <span class="kpi-value">{{ analytics.last_30 }}</span>
+            <span class="kpi-sub">{{ analytics.last_7 }} in the last 7 days · {{ analytics.all_time }} all time</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Success rate</span>
+            <span class="kpi-value">{% if analytics.success_rate is not none %}{{ analytics.success_rate }}%{% else %}–{% endif %}</span>
+            <span class="kpi-sub">{{ analytics.failures_30 }} failed attempt{{ '' if analytics.failures_30 == 1 else 's' }}</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Estimated X API spend</span>
+            <span class="kpi-value">${{ '%.2f'|format(analytics.spend_30) }}</span>
+            <span class="kpi-sub">Last 30 days, from your cost settings</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Monthly cost at this pace</span>
+            <span class="kpi-value">${{ '%.2f'|format(analytics.monthly_projection) }}</span>
+            <span class="kpi-sub">If auto-post runs nonstop, every {{ profile_worker.interval }}</span>
+        </div>
+    </div>
+
+    <div class="analytics-grid">
+        <div class="card chart-card">
+            <h2><i class="fa-solid fa-chart-column"></i> Posts per day</h2>
+            <div id="chart-daily" class="chart" data-series="daily" data-label-every="5"
+                 aria-label="Column chart of posts per day for the last 30 days"></div>
+            <details class="chart-table">
+                <summary>Show as table</summary>
+                <table>
+                    <thead><tr><th>Day</th><th>Posts</th></tr></thead>
+                    <tbody>
+                    {% for d in analytics.daily %}<tr><td>{{ d.label }}</td><td>{{ d.value }}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </details>
+        </div>
+
+        <div class="card chart-card">
+            <h2><i class="fa-regular fa-clock"></i> Posts by hour of day</h2>
+            <div id="chart-hourly" class="chart" data-series="hourly" data-label-every="3"
+                 aria-label="Column chart of posts by hour of day for the last 30 days"></div>
+            <details class="chart-table">
+                <summary>Show as table</summary>
+                <table>
+                    <thead><tr><th>Hour</th><th>Posts</th></tr></thead>
+                    <tbody>
+                    {% for h in analytics.hourly %}<tr><td>{{ h.label }}</td><td>{{ h.value }}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </details>
+        </div>
+
+        <div class="card">
+            <h2><i class="fa-solid fa-layer-group"></i> Breakdown, last 30 days</h2>
+            <dl class="breakdown">
+                <div><dt>Profile posts</dt><dd>{{ analytics.profile_30 }}</dd></div>
+                <div><dt>Community posts</dt><dd>{{ analytics.community_30 }}</dd></div>
+                <div>
+                    <dt>Posts containing a link</dt>
+                    <dd>{{ analytics.links_30 }}</dd>
+                </div>
+                <div><dt>Community posts all time</dt><dd>{{ analytics.all_time_community }}</dd></div>
+                <div><dt>Queue runway</dt><dd>{{ analytics.runway or 'Queue is empty' }}</dd></div>
+            </dl>
+            <p class="hint"><i class="fa-solid fa-circle-info"></i> X charges about ${{ settings.cost_per_post }} for a text post and ${{ settings.cost_per_link_post }} for a post with a link. Spend figures are estimates; your X developer console shows the real charges.</p>
+        </div>
+
+        <div class="card">
+            <div class="card-title-row">
+                <h2><i class="fa-solid fa-bug"></i> Recent errors</h2>
+                {% if failures %}
+                <form action="{{ url_for('clear_failures') }}" method="POST" onsubmit="return confirm('Clear the error log?');">
+                    <button type="submit" class="btn btn-secondary btn-small">Clear</button>
+                </form>
+                {% endif %}
+            </div>
+            <div class="error-list">
+                {% for f in failures %}
+                <div class="error-item">
+                    <div class="history-meta">
+                        <span class="timestamp ts" data-iso="{{ f.failed_at.isoformat() }}"></span>
+                        <span class="type-badge type-{{ f.type }}">{{ f.type }}</span>
+                    </div>
+                    <p class="error-text">{{ f.error }}</p>
+                    <p class="error-tweet">{{ f.text }}</p>
+                </div>
+                {% else %}
+                <p class="empty-message">No errors logged. Nice.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>

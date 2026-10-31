@@ -1,0 +1,211 @@
+<!-- Dashboard Tab -->
+<div id="dashboard-content" class="tab-content active">
+    <header class="page-header">
+        <div>
+            <h1>Dashboard</h1>
+            <p class="page-subtitle">Queue tweets, post them now, or let auto-post space them out.</p>
+        </div>
+    </header>
+
+    {% if problem %}
+    <div class="problem-banner" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div>
+            <strong>The last post attempt failed.</strong>
+            <span>{{ problem.error }}</span>
+            <span class="muted ts" data-iso="{{ problem.failed_at.isoformat() }}"></span>
+        </div>
+        <a href="#analytics" class="btn btn-secondary btn-small" data-goto-tab="analytics-content">See errors</a>
+    </div>
+    {% endif %}
+
+    <div class="status-strip">
+        <div class="status-tile">
+            <span class="status-label">Auto-post</span>
+            {% if profile_worker.active %}
+                <span class="status-value"><span class="dot online"></span> {{ profile_worker.state }}</span>
+                <span class="status-sub">
+                    {% if profile_worker.next_at %}Next <span class="ts" data-iso="{{ profile_worker.next_at }}" data-format="time"></span>
+                    <span class="countdown" data-until="{{ profile_worker.next_at }}"></span>
+                    {% else %}Every {{ profile_worker.interval }}{% endif %}
+                </span>
+            {% else %}
+                <span class="status-value"><span class="dot offline"></span> Off</span>
+                <span class="status-sub">Every {{ profile_worker.interval }} when on</span>
+            {% endif %}
+        </div>
+        <div class="status-tile">
+            <span class="status-label">In queue</span>
+            <span class="status-value">{{ stats.unposted }}</span>
+            <span class="status-sub">{% if analytics.runway %}Lasts about {{ analytics.runway }}{% else %}Add tweets to start{% endif %}</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Scheduled</span>
+            <span class="status-value">{{ scheduled_count }}</span>
+            <span class="status-sub">{% if next_scheduled %}Next <span class="ts" data-iso="{{ next_scheduled.scheduled_at.isoformat() }}"></span>{% else %}Nothing upcoming{% endif %}</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Posted today</span>
+            <span class="status-value">{{ analytics.today }}</span>
+            <span class="status-sub">{{ analytics.all_time }} all time</span>
+        </div>
+    </div>
+
+    <div id="dashboard-layout" class="dashboard-left-right-container">
+        <div class="dashboard-left">
+            <div class="card tweet-form-card">
+                <h2><i class="fa-solid fa-pen-to-square"></i> Compose & Queue</h2>
+                <form id="tweet-form" action="{{ url_for('add_tweets') }}" method="post">
+                    <textarea id="tweet-input" name="tweets_input" rows="5" data-preview="compose-preview"
+                              placeholder='[A new tweet...] [And another one...]'></textarea>
+                    <div id="compose-preview" class="tweet-preview" aria-live="polite"></div>
+                    <div class="form-actions">
+                        <button type="submit" name="action" value="post" class="btn btn-secondary"
+                                title="Post the first tweet right away and queue the rest">
+                            <i class="fa-solid fa-paper-plane"></i> Post first now
+                        </button>
+                        <button type="submit" name="action" value="queue" class="btn btn-primary">
+                            <i class="fa-solid fa-plus"></i> Add to Queue
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card actions-card">
+                <h2><i class="fa-solid fa-bolt"></i> Actions</h2>
+                <div class="action-row">
+                    {% if posting_active %}
+                    <form action="{{ url_for('stop_auto_posting') }}" method="POST">
+                        <button type="submit" class="btn btn-warning"><i class="fa-solid fa-pause"></i> Pause Auto Post</button>
+                    </form>
+                    {% else %}
+                    <form action="{{ url_for('start_auto_posting') }}" method="POST">
+                        <button type="submit" class="btn btn-success"><i class="fa-solid fa-play"></i> Start Auto Post</button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ url_for('post_next') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary" {% if not queue %}disabled{% endif %}>
+                            <i class="fa-solid fa-forward"></i> Post Next
+                        </button>
+                    </form>
+                    <button type="button" class="btn btn-secondary js-open-schedule"><i class="fa-regular fa-clock"></i> Schedule</button>
+                    <form action="{{ url_for('clear_stats') }}" method="POST" onsubmit="return confirm('Reset the posted counter to zero?');">
+                        <button type="submit" class="btn btn-ghost-danger"><i class="fa-solid fa-rotate-left"></i> Reset Stats</button>
+                    </form>
+                </div>
+                <p class="hint">Auto-post picks {{ 'a random' if settings.queue_order == 'random' else 'the oldest' }} tweet every {{ profile_worker.interval }}{% if settings.quiet_hours_enabled == '1' %}, and pauses during quiet hours ({{ settings.quiet_start }} to {{ settings.quiet_end }}){% endif %}. Change this in Settings.</p>
+            </div>
+        </div>
+
+        <div class="dashboard-right">
+            <div class="card tabbed-card">
+                <div class="card-tabs" role="tablist">
+                    <button class="card-tab-link active" data-tab="queue-tab"><i class="fa-solid fa-list-check"></i> Queue ({{ stats.unposted }})</button>
+                    <button class="card-tab-link" data-tab="scheduled-tab"><i class="fa-solid fa-calendar-days"></i> Scheduled ({{ scheduled_count }})</button>
+                    <button class="card-tab-link" data-tab="history-tab"><i class="fa-solid fa-clock-rotate-left"></i> History ({{ history|length }})</button>
+                </div>
+
+                <div id="queue-tab" class="card-tab-content active">
+                    <div class="card-header">
+                        <h3>Tweet Queue</h3>
+                        {% if queue %}
+                        <div class="header-actions">
+                            <a class="btn btn-secondary btn-small" href="{{ url_for('export_queue') }}" title="Download the queue as bracketed text"><i class="fa-solid fa-download"></i></a>
+                            <form action="{{ url_for('clear_queue') }}" method="POST" onsubmit="return confirm('Are you sure you want to clear the entire queue?');">
+                                <button type="submit" class="btn btn-danger btn-small">Clear All</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-content">
+                        <div class="tweet-queue-container">
+                            {% for tweet in queue %}
+                            <div class="tweet-item">
+                                <div class="tweet-body">
+                                    <p>{{ tweet.text }}</p>
+                                    <span class="tweet-meta js-char-count"></span>
+                                </div>
+                                <div class="fab-container">
+                                    <button type="button" class="fab-main" aria-label="Tweet actions"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                                    <div class="fab-actions">
+                                        <form action="{{ url_for('post_specific_tweet', tweet_id=tweet.id) }}" method="POST">
+                                            <button type="submit" class="btn btn-primary btn-small btn-icon" title="Post Now"><i class="fa-solid fa-paper-plane"></i></button>
+                                        </form>
+                                        <button type="button" class="btn btn-secondary btn-small btn-icon js-edit-tweet"
+                                                data-action="{{ url_for('update_tweet', tweet_id=tweet.id) }}"
+                                                data-text="{{ tweet.text }}" title="Edit Tweet"><i class="fa-solid fa-pencil"></i></button>
+                                        <form action="{{ url_for('delete_tweet', tweet_id=tweet.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this tweet?');">
+                                            <button type="submit" class="btn btn-danger btn-small btn-icon" title="Delete Tweet"><i class="fa-solid fa-trash"></i></button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <p class="empty-message">The queue is empty. Add some tweets!</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                <div id="scheduled-tab" class="card-tab-content">
+                    <div class="card-header">
+                        <h3>Scheduled Tweets</h3>
+                        <a href="#scheduler" class="btn btn-secondary btn-small" data-goto-tab="scheduler-content">Open calendar</a>
+                    </div>
+                    <div class="card-content">
+                        <div class="tweet-queue-container">
+                            {% for item in scheduled %}
+                            <div class="tweet-item">
+                                <div class="tweet-body">
+                                    <span class="timestamp ts" data-iso="{{ item.scheduled_at.isoformat() }}"></span>
+                                    <p>{{ item.text }}</p>
+                                </div>
+                                <div class="fab-container">
+                                    <button type="button" class="fab-main" aria-label="Scheduled tweet actions"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                                    <div class="fab-actions">
+                                        <button type="button" class="btn btn-secondary btn-small btn-icon js-edit-scheduled"
+                                                data-sid="{{ item.id }}" data-text="{{ item.text }}" data-iso="{{ item.scheduled_at.isoformat() }}"
+                                                title="Edit Scheduled"><i class="fa-solid fa-pencil"></i></button>
+                                        <form action="{{ url_for('delete_scheduled', sid=item.id) }}" method="POST" onsubmit="return confirm('Cancel this scheduled tweet?');">
+                                            <button type="submit" class="btn btn-danger btn-small btn-icon" title="Cancel"><i class="fa-solid fa-trash"></i></button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <p class="empty-message">No scheduled tweets.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                <div id="history-tab" class="card-tab-content">
+                    <div class="card-header">
+                        <h3>Post History</h3>
+                        {% if history %}
+                        <div class="header-actions">
+                            <a class="btn btn-secondary btn-small" href="{{ url_for('export_history') }}" title="Download history as CSV"><i class="fa-solid fa-download"></i></a>
+                            <form action="{{ url_for('clear_history') }}" method="POST" onsubmit="return confirm('Are you sure you want to clear all post history?');">
+                                <button type="submit" class="btn btn-danger btn-small">Clear History</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-content post-history-container">
+                        {% for post in history %}
+                        <div class="history-item">
+                            <div class="history-meta">
+                                <span class="timestamp ts" data-iso="{{ post.posted_at.isoformat() }}"></span>
+                                <span class="type-badge type-{{ post.type }}">{{ post.type }}</span>
+                            </div>
+                            <p>{{ post.text }}</p>
+                        </div>
+                        {% else %}
+                        <p class="empty-message">No posts in your history yet.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

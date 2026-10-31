@@ -1,0 +1,8 @@
+apscheduler
+requests
+
+python-dotenv
+
+flask
+pytz
+tzdata

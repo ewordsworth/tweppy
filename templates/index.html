@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tweppy - Modern Twitter Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <i class="fa-brands fa-twitter"></i>
+                <span>Tweppy</span>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="#dashboard" class="nav-link active" data-tab="dashboard-content">
+                        <i class="fa-solid fa-table-columns"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#analytics" class="nav-link" data-tab="analytics-content">
+                        <i class="fa-solid fa-chart-simple"></i>
+                        <span>Analytics</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#scheduler" class="nav-link" data-tab="scheduler-content">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span>Scheduler</span>
+                        {% if scheduled_count %}<span class="nav-badge">{{ scheduled_count }}</span>{% endif %}
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#communities" class="nav-link" data-tab="communities-content">
+                        <i class="fa-solid fa-users"></i>
+                        <span>Communities</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#settings" class="nav-link" data-tab="settings-content">
+                        <i class="fa-solid fa-gear"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+            <div class="sidebar-account">
+                {% if account.username %}
+                    <i class="fa-brands fa-x-twitter"></i>
+                    <span>@{{ account.username }}</span>
+                {% else %}
+                    <i class="fa-solid fa-plug-circle-xmark"></i>
+                    <span>No X account linked</span>
+                {% endif %}
+            </div>
+            <div class="footer-status">
+                {% if db_connected %}
+                    <span class="dot online"></span> Cloudflare D1 Connected
+                {% else %}
+                    <span class="dot offline"></span> Local DB fallback (not persistent)
+                {% endif %}
+                <a class="source-link" href="{{ source_url }}" target="_blank" rel="noopener">
+                    <i class="fa-brands fa-github"></i> Source code · AGPL-3.0
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <div class="flash-messages" role="status" aria-live="polite">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}<button type="button" class="close-alert" aria-label="Dismiss">&times;</button></div>
+                {% endfor %}
+            {% endwith %}
+            </div>
+
+            {% include 'partials/dashboard.html' %}
+            {% include 'partials/analytics.html' %}
+            {% include 'partials/scheduler.html' %}
+            {% include 'partials/communities.html' %}
+            {% include 'partials/settings.html' %}
+        </main>
+    </div>
+
+    {% include 'partials/modals.html' %}
+
+    <script id="page-data" type="application/json">{{ page_data|tojson }}</script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

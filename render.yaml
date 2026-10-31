@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: twitter-bot-webapp
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python start.py
+    envVars:
+      - key: CF_ACCOUNT_ID
+        sync: false
+      - key: CF_D1_DATABASE_ID
+        sync: false
+      - key: CF_API_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: CLIENT_SECRET
+        sync: false
+      - key: REDIRECT_URI
+        sync: false

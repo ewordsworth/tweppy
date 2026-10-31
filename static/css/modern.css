@@ -1,0 +1,704 @@
+/* Basic Reset & Modern Font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+    --bg-color: #1a1a1a;
+    --sidebar-bg: #212121;
+    --primary-accent: #1DA1F2;
+    --text-color: #e0e0e0;
+    --text-muted: #888888;
+    --border-color: #333333;
+    --card-bg: #2c2c2c;
+    --success-color: #28a745;
+    --error-color: #dc3545;
+    --hover-bg: #3a3a3a;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body, html {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden; /* No scroll on the body */
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+}
+
+/* Sidebar Navigation */
+.sidebar {
+    width: 240px;
+    background-color: var(--sidebar-bg);
+    padding: 2rem 1rem;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-accent);
+    margin-bottom: 3rem;
+}
+
+.logo .fa-twitter {
+    font-size: 2rem;
+}
+
+.nav-menu {
+    list-style: none;
+    flex-grow: 1;
+}
+
+.nav-item a {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    text-decoration: none;
+    color: var(--text-muted);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.nav-item a:hover {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
+.nav-item a.active {
+    background-color: var(--primary-accent);
+    color: white;
+    font-weight: 600;
+}
+
+.nav-item a i {
+    width: 20px; /* Align icons */
+    text-align: center;
+}
+
+.footer-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.footer-status .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.footer-status .dot.online {
+    background-color: var(--success-color);
+}
+
+.footer-status .dot.offline {
+    background-color: var(--error-color);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.card-header h3 {
+    margin: 0;
+    padding: 1rem 0;
+}
+
+/* Main content area where tabs are displayed */
+.main-content {
+    flex-grow: 1;
+    padding: 2rem;
+    height: 100vh;
+    overflow-y: auto; /* Allow scrolling within the content area if needed */
+}
+
+.tab-content {
+    display: none; /* Hidden by default */
+    height: 100%;
+    flex-direction: column;
+}
+
+.tab-content.active {
+    display: flex; /* Show active tab */
+}
+
+header {
+    margin-bottom: 2rem;
+}
+
+header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+/* Edit Modal Styles */
+.modal {
+    display: none; 
+    position: fixed; 
+    z-index: 1000; 
+    left: 0;
+    top: 0;
+    width: 100%; 
+    height: 100%; 
+    overflow: auto; 
+    background-color: rgba(0,0,0,0.6);
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background-color: var(--card-bg);
+    margin: 15% auto; 
+    padding: 2rem;
+    border: 1px solid var(--border-color);
+    width: 80%;
+    max-width: 500px;
+    border-radius: 12px;
+    position: relative;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    animation: slide-in 0.3s ease-out;
+}
+
+@keyframes slide-in {
+    from { transform: translateY(-50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.close-button {
+    color: var(--text-muted);
+    position: absolute;
+    top: 1rem;
+    right: 1.5rem;
+    font-size: 28px;
+    font-weight: bold;
+    transition: color 0.2s;
+}
+
+.close-button:hover,
+.close-button:focus {
+    color: var(--text-primary);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+#edit-form textarea {
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+/* In-card Tabs */
+.card-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.card-tab-link {
+    flex: 1;
+    padding: 1rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    border-bottom: 3px solid transparent;
+}
+
+.card-tab-link.active {
+    color: var(--primary-accent);
+    border-bottom-color: var(--primary-accent);
+}
+
+.card-tab-link:hover:not(.active) {
+    color: var(--text-color);
+    background-color: var(--hover-bg);
+}
+
+.card-tab-content {
+    display: none;
+    padding: 1.5rem;
+}
+
+.card-tab-content.active {
+    display: block;
+}
+
+.card.tabbed-card {
+    padding: 0;
+}
+
+.card.tabbed-card .card-header {
+    padding: 0;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Dashboard Specific Layout */
+.dashboard-left-right-container {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start; /* Align items to the top */
+    height: calc(100% - 72px); /* Adjust for header height */
+}
+
+.dashboard-left, .dashboard-right {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.dashboard-left {
+    flex: 2; /* Takes up 2/3 of the space */
+}
+
+.dashboard-right {
+    flex: 1; /* Takes up 1/3 of the space */
+    display: flex;
+    flex-direction: column;
+}
+
+.history-list {
+    max-height: 300px; /* Or any other desired height */
+    overflow-y: auto;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.history-item:last-child {
+    border-bottom: none;
+}
+
+.history-item p {
+    margin: 0;
+    flex-grow: 1;
+    padding-right: 1rem;
+}
+
+.history-item .timestamp {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.empty-message {
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2rem;
+}
+
+/* Custom Scrollbar for Tweet Queue */
+.tweet-queue-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.tweet-queue-container::-webkit-scrollbar-track {
+    background: var(--sidebar-bg);
+    border-radius: 10px;
+}
+
+.tweet-queue-container::-webkit-scrollbar-thumb {
+    background-color: var(--primary-accent);
+    border-radius: 10px;
+    border: 2px solid var(--sidebar-bg);
+}
+
+.tweet-queue-container::-webkit-scrollbar-thumb:hover {
+    background-color: #1a8cd8;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.card h2 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Stats Card */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-accent);
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* Tweet Form */
+#tweet-form {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+#tweet-input {
+    flex-grow: 1;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 8px;
+    padding: 1rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 1rem;
+    resize: none;
+    margin-bottom: 1rem;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+}
+
+.btn-small {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+.btn-icon {
+    padding: 0.4rem 0.6rem;
+    line-height: 1;
+}
+
+.btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 8px;
+    white-space: nowrap;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.btn-primary {
+    background-color: var(--primary-accent);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #1a91da;
+}
+
+.btn-secondary {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background-color: #3a3a3a;
+}
+
+/* Tweet Queue */
+.tweet-queue-container {
+    flex-grow: 1;
+    overflow-y: auto; /* Allow scrolling within the queue only */
+}
+
+.tweet-item {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tweet-item:last-child {
+    border-bottom: none;
+}
+
+.tweet-text {
+    flex-grow: 1;
+    padding-right: 1rem;
+}
+
+.tweet-actions .btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+}
+
+/* Placeholder Content */
+.placeholder-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    flex-direction: column;
+    gap: 1rem;
+    color: var(--text-muted);
+}
+
+.placeholder-content i {
+    font-size: 4rem;
+}
+
+/* Flash Messages */
+.flash-messages {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.alert {
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    min-width: 250px;
+}
+
+.alert-success {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.close-alert {
+    float: right;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-left: 15px;
+    line-height: 20px;
+    transition: color 0.2s;
+}
+
+.close-alert:hover {
+    color: var(--card-bg);
+}
+
+.alert-error {
+    background-color: var(--error-color);
+    color: white;
+}
+
+/* Community Management Styles */
+.community-management-card {
+    margin-bottom: 20px;
+}
+
+/* Responsive height for main queue card */
+#queue-tab .tweet-queue-container {
+    max-height: 60vh; /* responsive to device height */
+    overflow-y: auto; /* show scrollbar inside the card */
+}
+
+/* Apply same responsive scroll to Scheduled tab */
+#scheduled-tab .tweet-queue-container {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* Apply same responsive scroll to History tab */
+#history-tab .post-history-container {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* Consistent scrollbar styling for all scrollable tab lists */
+#queue-tab .tweet-queue-container,
+#scheduled-tab .tweet-queue-container,
+#history-tab .post-history-container {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: var(--primary-accent) transparent; /* Firefox */
+}
+
+#queue-tab .tweet-queue-container::-webkit-scrollbar,
+#scheduled-tab .tweet-queue-container::-webkit-scrollbar,
+#history-tab .post-history-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#queue-tab .tweet-queue-container::-webkit-scrollbar-track,
+#scheduled-tab .tweet-queue-container::-webkit-scrollbar-track,
+#history-tab .post-history-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#queue-tab .tweet-queue-container::-webkit-scrollbar-thumb,
+#scheduled-tab .tweet-queue-container::-webkit-scrollbar-thumb,
+#history-tab .post-history-container::-webkit-scrollbar-thumb {
+    background-color: var(--primary-accent);
+    border-radius: 8px;
+}
+
+#queue-tab .tweet-queue-container::-webkit-scrollbar-thumb:hover,
+#scheduled-tab .tweet-queue-container::-webkit-scrollbar-thumb:hover,
+#history-tab .post-history-container::-webkit-scrollbar-thumb:hover {
+    background-color: #1a91da; /* slightly darker accent on hover */
+}
+
+/* Community Tabs Scroll */
+#community-queue-tab .tweet-queue-container,
+#community-history-tab .card-content {
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+/* Community Tabs Scrollbar Styling */
+#community-queue-tab .tweet-queue-container,
+#community-history-tab .card-content {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: var(--primary-accent) transparent; /* Firefox */
+}
+
+#community-queue-tab .tweet-queue-container::-webkit-scrollbar,
+#community-history-tab .card-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+#community-queue-tab .tweet-queue-container::-webkit-scrollbar-track,
+#community-history-tab .card-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#community-queue-tab .tweet-queue-container::-webkit-scrollbar-thumb,
+#community-history-tab .card-content::-webkit-scrollbar-thumb {
+    background-color: var(--primary-accent);
+    border-radius: 8px;
+}
+
+#community-queue-tab .tweet-queue-container::-webkit-scrollbar-thumb:hover,
+#community-history-tab .card-content::-webkit-scrollbar-thumb:hover {
+    background-color: #1a91da;
+}
+
+.active-community-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    color: #eee;
+}
+
+.saved-communities-list {
+    margin-top: 20px;
+}
+
+.saved-communities-list h3 {
+    font-size: 1rem;
+    color: #ccc;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #444;
+    padding-bottom: 5px;
+}
+
+.saved-communities-list ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.saved-communities-list .community-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background-color: #333;
+    margin-bottom: 5px;
+    transition: background-color 0.2s;
+}
+
+.saved-communities-list .community-item:hover {
+    background-color: #444;
+}
+
+.saved-communities-list .community-item.active {
+    background-color: #004d40; /* Dark teal for active item */
+    font-weight: bold;
+}
+
+.saved-communities-list .community-item span {
+    color: #eee;
+}
+
+/* FAB (Floating Action Button) Styles */
+.fab-container {
+    position: relative;
+}
+
+.fab-main {
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.fab-main:hover {
+    background-color: var(--hover-bg);
+}
+
+.fab-actions {
+    display: none; /* This is the key: hidden by default */
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.5rem;
+    gap: 0.5rem;
+    margin-right: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.fab-container.active .fab-actions {
+    display: flex; /* This rule makes it visible only when the container is active */
+}
