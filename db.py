@@ -134,14 +134,26 @@ class D1Backend:
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
         }
+        # One keep-alive session per thread. Opening a new TLS connection for
+        # every query costs seconds on slow networks; reusing one costs ~0.2s.
+        self._local = threading.local()
+
+    def _session(self):
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(self.headers)
+            self._local.session = session
+        return session
 
     def run(self, sql, params=()):
-        response = requests.post(
-            self.url,
-            headers=self.headers,
-            json={"sql": sql, "params": list(params)},
-            timeout=20,
-        )
+        payload = {"sql": sql, "params": list(params)}
+        try:
+            response = self._session().post(self.url, json=payload, timeout=(10, 20))
+        except requests.exceptions.ConnectionError:
+            # A kept-alive connection can go stale; retry once on a fresh one.
+            self._local.session = None
+            response = self._session().post(self.url, json=payload, timeout=(10, 20))
         try:
             data = response.json()
         except ValueError:
