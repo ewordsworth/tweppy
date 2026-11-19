@@ -21,6 +21,14 @@ services:
         scope: project
       - key: REDIRECT_URI
         scope: project
+      - key: OPENAI_API_KEY
+        scope: project
+      - key: IMAGINEART_API_KEY
+        scope: project
+      - key: ADMIN_TOKEN
+        scope: project
+      - key: SECRET_KEY
+        scope: project
     health_check:
       http:
         path: /

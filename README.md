@@ -9,6 +9,8 @@ You paste tweets in `[square brackets]`, and Tweppy posts them one at a time on 
 - **Queue and auto-post.** Add many tweets at once, then post one every 30 minutes to 24 hours, in random or oldest-first order.
 - **Scheduler.** A month calendar, single scheduled posts, and bulk scheduling that spaces tweets out from a start time.
 - **Communities.** Queue posts for an X Community, optionally retweeting each one to your profile.
+- **Create with AI.** Draft posts in your own voice with the OpenAI API, generate images (OpenAI or ImagineArt) and video (ImagineArt, including its hosted Kling models), or upload your own file, then attach it to a post.
+- **Engage.** Watch a list of accounts. Tweppy reads their new posts and your mentions, drafts a reply for each, and gives you one-tap Like, Reply and Quote buttons.
 - **Analytics.** Posts per day and per hour, success rate, an X API spend estimate, and a plain-English error log.
 - **Quiet hours.** Auto-posting pauses overnight in your timezone.
 - **Safe defaults.** Duplicate tweets are skipped, failed posts back off instead of retrying every minute, and auto-posting resumes after a restart.
@@ -74,10 +76,34 @@ All settings live in `.env`. See `.env.example` for descriptions.
 | `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID`, `CF_API_TOKEN` | Recommended | Cloudflare D1 storage |
 | `CLIENT_ID`, `CLIENT_SECRET` | Yes | X OAuth 2.0 app credentials |
 | `REDIRECT_URI` | Yes | Must match the app's Callback URI exactly |
+| `OPENAI_API_KEY` | Optional | AI drafts, reply drafts, and images |
+| `IMAGINEART_API_KEY` | Optional | ImagineArt images and video |
 | `ADMIN_TOKEN` | On public hosts | Password for the dashboard |
 | `SECRET_KEY` | Recommended | Keeps dashboard sessions valid across restarts |
 
 Posting interval, quiet hours, timezone, and cost estimates are set in the dashboard's **Settings** tab.
+
+## AI writing and media
+
+Set `OPENAI_API_KEY` to turn on the **Create** tab's drafts and image generation, and `IMAGINEART_API_KEY` for ImagineArt images and video. Both are optional and billed by the provider per use. Describe your voice in **Settings** so drafts sound like you. Model names change often, so Settings has a button that lists the models your OpenAI key can use.
+
+Generated and uploaded files are stored in the database, and uploaded to X only when the post goes out. Attaching media needs the `media.write` permission: if you connected your X account before this feature existed, run `python authorize.py` again.
+
+## Engage, and what X's API allows
+
+The **Engage** tab works within the limits X sets for self-serve (pay-per-use) API apps:
+
+| Action | Through the API? | What Tweppy does |
+|---|---|---|
+| Post, with or without media | Yes | Posts directly |
+| Reply to a post that mentions or quotes you | Yes | **Send reply now**, or automatically if you turn that on |
+| Reply to any other post | No, X rejects it | **Reply on X** opens X with your draft filled in |
+| Like | No, removed in April 2026 | **Like on X** opens X's like screen |
+| Quote post | No, removed in April 2026 | **Quote on X** opens X with your draft and the link |
+
+X also does not tell apps which accounts you have notifications turned on for, so add those accounts to the watchlist by hand. Reading posts is billed by X per post read; the tab shows a running estimate.
+
+Tweppy does not automate X's website to get around these limits. X treats that as grounds for permanent suspension.
 
 ## Deploying
 

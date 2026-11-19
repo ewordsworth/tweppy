@@ -124,6 +124,7 @@
                                 <div class="tweet-body">
                                     <p>{{ tweet.text }}</p>
                                     <span class="tweet-meta js-char-count"></span>
+                                    {% if tweet.media_id %}<a class="media-tag" href="{{ url_for('studio.media_file', media_id=tweet.media_id) }}" target="_blank" rel="noopener"><i class="fa-solid fa-paperclip"></i> Media attached</a>{% endif %}
                                 </div>
                                 <div class="fab-container">
                                     <button type="button" class="fab-main" aria-label="Tweet actions"><i class="fa-solid fa-ellipsis-vertical"></i></button>
@@ -159,6 +160,7 @@
                                 <div class="tweet-body">
                                     <span class="timestamp ts" data-iso="{{ item.scheduled_at.isoformat() }}"></span>
                                     <p>{{ item.text }}</p>
+                                    {% if item.media_id %}<a class="media-tag" href="{{ url_for('studio.media_file', media_id=item.media_id) }}" target="_blank" rel="noopener"><i class="fa-solid fa-paperclip"></i> Media attached</a>{% endif %}
                                 </div>
                                 <div class="fab-container">
                                     <button type="button" class="fab-main" aria-label="Scheduled tweet actions"><i class="fa-solid fa-ellipsis-vertical"></i></button>

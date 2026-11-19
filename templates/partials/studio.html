@@ -1,0 +1,102 @@
+<!-- Create Tab: AI drafts, media, and a single-post composer -->
+<div id="create-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Create</h1>
+            <p class="page-subtitle">Draft posts with AI, make an image or video, then queue, schedule, or post.</p>
+        </div>
+    </header>
+
+    {% if not ai_openai %}
+    <div class="problem-banner" role="note">
+        <i class="fa-solid fa-key"></i>
+        <div>
+            <strong>AI writing is off.</strong>
+            <span>Set OPENAI_API_KEY in your environment and restart to draft posts and generate images.</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="studio-grid">
+        <div class="studio-col">
+            <div class="card">
+                <h2><i class="fa-solid fa-wand-magic-sparkles"></i> Draft with AI</h2>
+                <label for="ai-brief">What should the posts be about?</label>
+                <textarea id="ai-brief" rows="3" placeholder="A topic, a link you want to react to, notes from your day..."></textarea>
+                <div class="form-actions">
+                    <select id="ai-count" aria-label="How many drafts">
+                        <option value="1">1 draft</option>
+                        <option value="3" selected>3 drafts</option>
+                        <option value="5">5 drafts</option>
+                        <option value="10">10 drafts</option>
+                    </select>
+                    <button type="button" class="btn btn-primary" id="ai-compose-btn" {% if not ai_openai %}disabled{% endif %}>
+                        <i class="fa-solid fa-pen-nib"></i> Write drafts
+                    </button>
+                </div>
+                <p class="hint" id="ai-compose-status">Drafts use the voice you describe in Settings. Nothing is posted until you choose to.</p>
+                <div id="ai-drafts" class="draft-list"></div>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-paper-plane"></i> Post</h2>
+                <form id="studio-form" action="{{ url_for('studio.studio_post') }}" method="POST" class="stacked-form js-utc-form">
+                    <textarea id="studio-text" name="text" rows="4" placeholder="Write a post, or pick a draft above" required
+                              data-preview="studio-preview" data-single="1"></textarea>
+                    <div id="studio-preview" class="tweet-preview"></div>
+                    <input type="hidden" name="media_id" id="studio-media-id">
+                    <div id="studio-attachment" class="attachment" hidden></div>
+                    <label for="studio-datetime">Schedule for (only used by Schedule)</label>
+                    <input id="studio-datetime" name="scheduled_at" type="datetime-local" data-utc-target="studio-datetime-utc" data-default-offset="60">
+                    <input type="hidden" id="studio-datetime-utc" name="scheduled_at_utc">
+                    <div class="form-actions">
+                        <button type="submit" name="action" value="post" class="btn btn-secondary"
+                                onclick="return confirm('Post this to X right now?');"><i class="fa-solid fa-paper-plane"></i> Post now</button>
+                        <button type="submit" name="action" value="schedule" class="btn btn-secondary"><i class="fa-regular fa-clock"></i> Schedule</button>
+                        <button type="submit" name="action" value="queue" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Add to queue</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="studio-col">
+            <div class="card">
+                <h2><i class="fa-solid fa-image"></i> Make media</h2>
+                <label for="media-prompt">Describe the image or video</label>
+                <textarea id="media-prompt" rows="3" placeholder="A quiet harbour at dawn, soft film grain"></textarea>
+                <div class="form-row">
+                    <div>
+                        <label for="media-provider">Made by</label>
+                        <select id="media-provider">
+                            <option value="openai" {% if not ai_openai %}disabled{% endif %}>OpenAI image{% if not ai_openai %} (no key){% endif %}</option>
+                            <option value="imagineart" {% if not ai_imagineart %}disabled{% endif %}>ImagineArt image{% if not ai_imagineart %} (no key){% endif %}</option>
+                            <option value="imagineart-video" {% if not ai_imagineart %}disabled{% endif %}>ImagineArt video{% if not ai_imagineart %} (no key){% endif %}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="media-aspect">Shape</label>
+                        <select id="media-aspect">
+                            <option value="square">Square</option>
+                            <option value="landscape">Landscape</option>
+                            <option value="portrait">Portrait</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <label class="btn btn-secondary" for="media-file"><i class="fa-solid fa-upload"></i> Upload a file</label>
+                    <input type="file" id="media-file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime" hidden>
+                    <button type="button" class="btn btn-primary" id="media-generate-btn" {% if not (ai_openai or ai_imagineart) %}disabled{% endif %}>
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate
+                    </button>
+                </div>
+                <p class="hint" id="media-status">A video made from a selected image animates that image. Generation is billed by the provider.</p>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-photo-film"></i> Media library</h2>
+                <div id="media-grid" class="media-grid"></div>
+                <p class="empty-message" id="media-empty" hidden>Nothing here yet. Generate or upload a file.</p>
+            </div>
+        </div>
+    </div>
+</div>

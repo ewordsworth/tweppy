@@ -89,6 +89,70 @@
                         <input id="set-cost-link" type="number" name="cost_per_link_post" min="0" max="10" step="0.001" value="{{ settings.cost_per_link_post }}" required>
                     </div>
                 </div>
+                <label for="set-cost-read">Post read, used by Engage (USD)</label>
+                <input id="set-cost-read" type="number" name="cost_per_read" min="0" max="10" step="0.001" value="{{ settings.cost_per_read }}" required>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-wand-magic-sparkles"></i> AI writing and media</h2>
+                <label for="set-voice">Your voice</label>
+                <textarea id="set-voice" name="ai_voice" rows="4" maxlength="2000"
+                          placeholder="Who you are, what you post about, how you sound. Paste a few of your own posts as examples.">{{ settings.ai_voice }}</textarea>
+                <p class="hint">Used for every draft and reply. The more specific this is, the less the drafts sound generic.</p>
+                <div class="form-row">
+                    <div>
+                        <label for="set-text-model">OpenAI text model</label>
+                        <input id="set-text-model" type="text" name="ai_text_model" list="openai-models" value="{{ settings.ai_text_model }}" placeholder="{{ ai_defaults.text }}">
+                    </div>
+                    <div>
+                        <label for="set-image-model">OpenAI image model</label>
+                        <input id="set-image-model" type="text" name="ai_image_model" list="openai-models" value="{{ settings.ai_image_model }}" placeholder="{{ ai_defaults.image }}">
+                    </div>
+                </div>
+                <datalist id="openai-models"></datalist>
+                <div class="form-row">
+                    <div>
+                        <label for="set-ia-image">ImagineArt image style</label>
+                        <input id="set-ia-image" type="text" name="imagineart_image_style" value="{{ settings.imagineart_image_style }}" placeholder="{{ ai_defaults.ia_image }}">
+                    </div>
+                    <div>
+                        <label for="set-ia-video">ImagineArt video model</label>
+                        <input id="set-ia-video" type="text" name="imagineart_video_style" value="{{ settings.imagineart_video_style }}" placeholder="{{ ai_defaults.ia_video }}">
+                    </div>
+                </div>
+                <div class="action-row">
+                    <button type="button" class="btn btn-secondary btn-small" id="check-openai" {% if not ai_openai %}disabled{% endif %}><i class="fa-solid fa-plug"></i> Check OpenAI key and list models</button>
+                    <span class="muted" id="check-openai-status">{{ 'OpenAI key set' if ai_openai else 'No OpenAI key' }} · {{ 'ImagineArt key set' if ai_imagineart else 'No ImagineArt key' }}</span>
+                </div>
+                <p class="hint">Leave a model blank to use the default shown in grey. Model names change often; the check lists the ones your key can use.</p>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-comments"></i> Engage</h2>
+                <label class="toggle">
+                    <input type="checkbox" name="engage_enabled" value="1" {% if settings.engage_enabled == '1' %}checked{% endif %}>
+                    <span>Check watched accounts automatically</span>
+                </label>
+                <label for="set-engage-interval">How often</label>
+                <select id="set-engage-interval" name="engage_interval_minutes">
+                    {% for minutes, label in engage_intervals %}
+                    <option value="{{ minutes }}" {% if minutes|string == settings.engage_interval_minutes %}selected{% endif %}>Every {{ label }}</option>
+                    {% endfor %}
+                </select>
+                <p class="hint">Each check reads up to 5 new posts per watched account, and each post read is billed by X.</p>
+                <label class="toggle">
+                    <input type="checkbox" name="engage_mentions" value="1" {% if settings.engage_mentions == '1' %}checked{% endif %}>
+                    <span>Also collect posts that mention me</span>
+                </label>
+                <label class="toggle">
+                    <input type="checkbox" name="engage_auto_draft" value="1" {% if settings.engage_auto_draft == '1' %}checked{% endif %}>
+                    <span>Draft a reply for each new post</span>
+                </label>
+                <label class="toggle">
+                    <input type="checkbox" name="engage_auto_reply_mentions" value="1" {% if settings.engage_auto_reply_mentions == '1' %}checked{% endif %}>
+                    <span>Send the drafted reply automatically when a watched account mentions me</span>
+                </label>
+                <p class="hint">This posts AI-written replies without you reading them first. It only applies to mentions, because that is the only reply X's API accepts.</p>
             </div>
 
             <div class="settings-save">

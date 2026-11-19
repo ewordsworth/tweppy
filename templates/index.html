@@ -24,6 +24,19 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#create" class="nav-link" data-tab="create-content">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>Create</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#engage" class="nav-link" data-tab="engage-content">
+                        <i class="fa-solid fa-comments"></i>
+                        <span>Engage</span>
+                        {% if engage_items %}<span class="nav-badge">{{ engage_items|length }}</span>{% endif %}
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#analytics" class="nav-link" data-tab="analytics-content">
                         <i class="fa-solid fa-chart-simple"></i>
                         <span>Analytics</span>
@@ -81,6 +94,8 @@
             </div>
 
             {% include 'partials/dashboard.html' %}
+            {% include 'partials/studio.html' %}
+            {% include 'partials/engage.html' %}
             {% include 'partials/analytics.html' %}
             {% include 'partials/scheduler.html' %}
             {% include 'partials/communities.html' %}
@@ -91,6 +106,8 @@
     {% include 'partials/modals.html' %}
 
     <script id="page-data" type="application/json">{{ page_data|tojson }}</script>
+    <script id="media-data" type="application/json">{{ media_items|tojson }}</script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/studio.js') }}"></script>
 </body>
 </html>

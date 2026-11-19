@@ -1,0 +1,123 @@
+<!-- Engage Tab: new posts from watched accounts, with drafted replies -->
+<div id="engage-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Engage</h1>
+            <p class="page-subtitle">New posts from the accounts you watch, each with a drafted reply.</p>
+        </div>
+        <form action="{{ url_for('studio.engage_check') }}" method="POST">
+            <button type="submit" class="btn btn-primary" {% if not watchlist and settings.engage_mentions != '1' %}disabled{% endif %}>
+                <i class="fa-solid fa-rotate"></i> Check now
+            </button>
+        </form>
+    </header>
+
+    {% if engage_error %}
+    <div class="problem-banner" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div><strong>The last check had problems.</strong> <span>{{ engage_error }}</span></div>
+    </div>
+    {% endif %}
+
+    <div class="status-strip">
+        <div class="status-tile">
+            <span class="status-label">Automatic checks</span>
+            {% if settings.engage_enabled == '1' %}
+                <span class="status-value"><span class="dot online"></span> On</span>
+                <span class="status-sub">Every {{ settings.engage_interval_minutes }} min</span>
+            {% else %}
+                <span class="status-value"><span class="dot offline"></span> Off</span>
+                <span class="status-sub">Turn on in Settings</span>
+            {% endif %}
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Waiting for you</span>
+            <span class="status-value">{{ engage_items|length }}</span>
+            <span class="status-sub">{{ engage_handled }} handled</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Last check</span>
+            <span class="status-value">{% if engage_last_check %}<span class="ts" data-iso="{{ engage_last_check.isoformat() }}"></span>{% else %}Never{% endif %}</span>
+            <span class="status-sub">{{ watchlist|length }} account(s) watched</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Posts read</span>
+            <span class="status-value">{{ engage_reads }}</span>
+            <span class="status-sub">About ${{ '%.2f'|format(engage_read_spend) }} in X reads</span>
+        </div>
+    </div>
+
+    <div class="studio-grid engage-grid">
+        <div class="studio-col">
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-inbox"></i> To handle</h2>
+                    {% if engage_handled %}
+                    <form action="{{ url_for('studio.engage_clear') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary btn-small">Clear handled</button>
+                    </form>
+                    {% endif %}
+                </div>
+                <div class="engage-list">
+                    {% for item in engage_items %}
+                    <article class="engage-item" data-id="{{ item.tweet_id }}" data-author="{{ item.author_username }}" data-kind="{{ item.kind }}">
+                        <div class="history-meta">
+                            <a href="https://x.com/{{ item.author_username or 'i' }}/status/{{ item.tweet_id }}" target="_blank" rel="noopener">@{{ item.author_username or 'unknown' }}</a>
+                            <span class="timestamp ts" data-iso="{{ item.posted_at.isoformat() }}"></span>
+                            {% if item.kind == 'mention' %}<span class="type-badge type-community">mentions you</span>{% endif %}
+                        </div>
+                        <p class="engage-text">{{ item.text }}</p>
+                        <textarea class="engage-draft" rows="2" aria-label="Your reply" placeholder="Your reply">{{ item.draft }}</textarea>
+                        <div class="engage-actions">
+                            <a class="btn btn-secondary btn-small js-like" target="_blank" rel="noopener"
+                               href="https://x.com/intent/like?tweet_id={{ item.tweet_id }}"><i class="fa-regular fa-heart"></i> Like on X</a>
+                            <a class="btn btn-primary btn-small js-reply" target="_blank" rel="noopener" href="#"><i class="fa-solid fa-reply"></i> Reply on X</a>
+                            <a class="btn btn-secondary btn-small js-quote" target="_blank" rel="noopener" href="#"><i class="fa-solid fa-quote-left"></i> Quote on X</a>
+                            {% if item.kind == 'mention' %}
+                            <button type="button" class="btn btn-secondary btn-small js-api-reply" title="X accepts API replies to posts that mention you"><i class="fa-solid fa-bolt"></i> Send reply now</button>
+                            {% endif %}
+                            <button type="button" class="btn btn-secondary btn-small js-redraft" {% if not ai_openai %}disabled{% endif %}><i class="fa-solid fa-wand-magic-sparkles"></i> Redraft</button>
+                            <button type="button" class="btn btn-secondary btn-small js-done"><i class="fa-solid fa-check"></i> Done</button>
+                            <button type="button" class="btn btn-ghost-danger btn-small js-dismiss">Skip</button>
+                        </div>
+                    </article>
+                    {% else %}
+                    <p class="empty-message">Nothing waiting. Add accounts to the watchlist, then press Check now.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="studio-col">
+            <div class="card">
+                <h2><i class="fa-solid fa-bell"></i> Watchlist</h2>
+                <form action="{{ url_for('studio.engage_watch') }}" method="POST">
+                    <label for="watch-username">Add an account</label>
+                    <div class="input-with-button">
+                        <input id="watch-username" type="text" name="username" placeholder="@handle" required>
+                        <button type="submit" class="btn btn-primary btn-small">Add</button>
+                    </div>
+                </form>
+                <p class="hint">X does not share your notification list with apps, so add the same accounts here by hand. Each lookup is one paid read.</p>
+                <dl class="breakdown watch-list">
+                    {% for account in watchlist %}
+                    <div>
+                        <dt><a href="https://x.com/{{ account.username }}" target="_blank" rel="noopener">@{{ account.username }}</a>{% if account.name %} <span class="muted">{{ account.name }}</span>{% endif %}</dt>
+                        <dd>
+                            <form action="{{ url_for('studio.engage_unwatch', user_id=account.user_id) }}" method="POST">
+                                <button type="submit" class="btn btn-ghost-danger btn-small" aria-label="Stop watching @{{ account.username }}">Remove</button>
+                            </form>
+                        </dd>
+                    </div>
+                    {% endfor %}
+                </dl>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-circle-info"></i> How this works</h2>
+                <p class="hint">X removed likes and quote posts from its paid API in April 2026, and only accepts an API reply when the other person mentioned or quoted you. So Like, Reply and Quote open X with everything filled in, and you confirm there. Use a browser where you are signed in to X.</p>
+                <p class="hint">Replies to posts that mention you can be sent from here. Checking costs about ${{ settings.cost_per_read }} per post read.</p>
+            </div>
+        </div>
+    </div>
+</div>

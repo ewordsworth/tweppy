@@ -11,6 +11,7 @@ import csv
 import io
 import os
 import re
+import sys
 import threading
 from datetime import datetime, timezone, timedelta, time as dtime
 from functools import wraps
@@ -22,6 +23,7 @@ from flask import (Flask, Response, render_template, request, redirect, url_for,
                    jsonify, session, make_response)
 
 import db
+import media as media_store
 import rest
 from rest import get_valid_token
 
@@ -43,7 +45,10 @@ SOURCE_URL = os.getenv("SOURCE_URL", "https://github.com/ewordsworth/tweppy")
 def _inject_source_url():
     return {"source_url": SOURCE_URL}
 
-X_TWEETS_URL = "https://api.x.com/2/tweets"
+X_API = "https://api.x.com/2"
+X_TWEETS_URL = f"{X_API}/tweets"
+X_MEDIA_URL = f"{X_API}/media/upload"
+MEDIA_CHUNK_BYTES = 4 * 1024 * 1024
 TWEET_MAX_CHARS = 280
 URL_RE = re.compile(r"https?://\S+|\bwww\.\S+", re.IGNORECASE)
 
@@ -66,6 +71,19 @@ DEFAULT_SETTINGS = {
     "timezone": "UTC",
     "cost_per_post": "0.015",
     "cost_per_link_post": "0.20",
+    "cost_per_read": "0.005",
+    # AI writing and media (see ai.py). Empty model fields use the defaults there.
+    "ai_voice": "",
+    "ai_text_model": "",
+    "ai_image_model": "",
+    "imagineart_image_style": "",
+    "imagineart_video_style": "",
+    # Engage tab (see studio.py)
+    "engage_enabled": "0",
+    "engage_interval_minutes": "60",
+    "engage_mentions": "1",
+    "engage_auto_draft": "1",
+    "engage_auto_reply_mentions": "0",
     # Persisted worker state, so auto-posting resumes after a restart
     "auto_post_enabled": "0",
     "community_auto_post_enabled": "0",
@@ -319,15 +337,16 @@ def drop_duplicates(texts, community_id=None):
     return fresh, len(texts) - len(fresh)
 
 
-def add_tweets_to_queue(tweets):
+def add_tweets_to_queue(tweets, media_id=None):
     now = db.utcnow_str()
-    return db.insert_many("tweet_queue", ("text", "created_at"), [(t, now) for t in tweets])
+    return db.insert_many("tweet_queue", ("text", "created_at", "media_id"),
+                          [(t, now, media_id) for t in tweets])
 
 
 def get_next_tweet():
     """Next unposted tweet: random or oldest-first, per Settings."""
     order = "RANDOM()" if setting("queue_order") == "random" else "created_at ASC, id ASC"
-    return db.query_one(f"SELECT id, text FROM tweet_queue WHERE posted = 0 ORDER BY {order} LIMIT 1")
+    return db.query_one(f"SELECT id, text, media_id FROM tweet_queue WHERE posted = 0 ORDER BY {order} LIMIT 1")
 
 
 def mark_tweet_posted(tweet_id, tweet_text):
@@ -337,11 +356,11 @@ def mark_tweet_posted(tweet_id, tweet_text):
         db.execute("DELETE FROM tweet_queue WHERE id = ?", (tweet_id,))
 
 
-def schedule_rows(items):
+def schedule_rows(items, media_id=None):
     """Insert scheduled posts. items: list of (text, aware_utc_datetime)."""
     now = db.utcnow_str()
-    rows = [(text, db.to_db_str(when), now) for text, when in items]
-    return db.insert_many("scheduled_posts", ("text", "scheduled_at", "created_at"), rows)
+    rows = [(text, db.to_db_str(when), now, media_id) for text, when in items]
+    return db.insert_many("scheduled_posts", ("text", "scheduled_at", "created_at", "media_id"), rows)
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +421,11 @@ def explain_x_error(response):
         return "This X app isn't attached to a Project in the developer portal."
     if status == 403 and "duplicate" in lowered:
         return "X rejected this as a duplicate of one of your recent posts."
+    if status == 403 and "reply" in lowered:
+        return ("X refused the reply. Its API only accepts replies to posts that mention or quote you. "
+                "Use the Reply on X button instead.")
+    if status == 403 and "scope" in lowered:
+        return "The login token is missing a permission. Run authorize.py again to grant it."
     if status == 401:
         return "X rejected the login token. Run authorize.py to authorize the app again."
     if status == 429:
@@ -428,8 +452,92 @@ def _create_post(payload):
     return False, explain_x_error(response), None
 
 
-def post_to_profile(caption):
-    ok, message, _ = _create_post({"text": caption})
+def _x_headers():
+    token = get_valid_token()
+    if not token:
+        raise RuntimeError("No X access token found. Run authorize.py to authorize the app.")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def x_get(path, params=None):
+    """GET from the X API. Returns (data, error); data is the parsed JSON body."""
+    try:
+        response = requests.get(X_API + path, headers=_x_headers(), params=params, timeout=30)
+    except Exception as e:
+        return None, f"Could not reach X: {e}"
+    if response.status_code != 200:
+        return None, explain_x_error(response)
+    return response.json(), None
+
+
+def _x_media_call(method, url, **kwargs):
+    response = requests.request(method, url, headers=_x_headers(), timeout=120, **kwargs)
+    if not 200 <= response.status_code < 300:
+        raise RuntimeError(explain_x_error(response))
+    try:
+        return response.json().get("data") or {}
+    except ValueError:
+        return {}
+
+
+def x_upload_media(media_id):
+    """Upload a library file to X. Returns (x_media_id, error).
+
+    X keeps an uploaded file for about a day, so this runs right before posting.
+    Small images go up in one request; everything else uses the chunked flow.
+    """
+    item = media_store.load(media_id)
+    if not item:
+        return None, "The attached image or video is missing from the media library."
+    data, mime, kind = item["data"], item["mime"], item["kind"]
+    try:
+        if kind == "image" and mime != "image/gif":
+            result = _x_media_call(
+                "POST", X_MEDIA_URL,
+                files={"media": ("upload", data, mime)},
+                data={"media_category": "tweet_image", "media_type": mime},
+            )
+            return str(result["id"]), None
+
+        category = "tweet_gif" if mime == "image/gif" else "tweet_video"
+        x_id = str(_x_media_call("POST", f"{X_MEDIA_URL}/initialize", json={
+            "media_type": mime, "total_bytes": len(data), "media_category": category,
+        })["id"])
+        for index, start in enumerate(range(0, len(data), MEDIA_CHUNK_BYTES)):
+            _x_media_call(
+                "POST", f"{X_MEDIA_URL}/{x_id}/append",
+                files={"media": ("chunk", data[start:start + MEDIA_CHUNK_BYTES], "application/octet-stream")},
+                data={"segment_index": str(index)},
+            )
+        info = _x_media_call("POST", f"{X_MEDIA_URL}/{x_id}/finalize").get("processing_info")
+        deadline = utcnow() + timedelta(minutes=5)
+        while info and info.get("state") in ("pending", "in_progress"):
+            if utcnow() > deadline:
+                return None, "X took too long to process the video."
+            threading.Event().wait(min(15, max(1, int(info.get("check_after_secs", 3)))))
+            info = _x_media_call("GET", X_MEDIA_URL,
+                                 params={"media_id": x_id, "command": "STATUS"}).get("processing_info")
+        if info and info.get("state") == "failed":
+            reason = (info.get("error") or {}).get("message", "unknown reason")
+            return None, f"X could not process the video: {reason}"
+        return x_id, None
+    except KeyError:
+        return None, "X accepted the upload but did not return a media ID."
+    except Exception as e:
+        return None, f"Media upload failed: {e}"
+
+
+def post_to_profile(caption, media_id=None, reply_to=None):
+    """Post to the profile, optionally with one library file or as a reply."""
+    payload = {"text": caption}
+    if media_id:
+        x_media_id, error = x_upload_media(media_id)
+        if error:
+            return False, error
+        payload["media"] = {"media_ids": [x_media_id]}
+    if reply_to:
+        payload["reply"] = {"in_reply_to_tweet_id": str(reply_to)}
+    ok, message, _ = _create_post(payload)
     return ok, message
 
 
@@ -439,9 +547,9 @@ def post_to_community(caption, community_id):
     return _create_post({"text": caption, "community_id": str(community_id)})
 
 
-def post_tweet(caption):
+def post_tweet(caption, media_id=None):
     """Backward-compatible alias for posting to profile."""
-    return post_to_profile(caption)
+    return post_to_profile(caption, media_id)
 
 
 def retweet(tweet_id):
@@ -473,7 +581,7 @@ def retweet(tweet_id):
 
 def publish_profile_item(item):
     """Post a queued profile tweet; record success or failure. Returns (ok, message)."""
-    ok, message = post_tweet(item["text"])
+    ok, message = post_tweet(item["text"], item.get("media_id"))
     if ok:
         mark_tweet_posted(item["id"], item["text"])
     else:
@@ -633,7 +741,7 @@ def scheduler_worker(stop):
         try:
             now = utcnow()
             due = db.query(
-                "SELECT id, text FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
+                "SELECT id, text, media_id FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
                 "ORDER BY scheduled_at ASC, id ASC",
                 (db.to_db_str(now),),
             )
@@ -641,7 +749,7 @@ def scheduler_worker(stop):
                 failures, retry_at = _scheduler_retry.get(doc["id"], (0, None))
                 if retry_at and retry_at > now:
                     continue
-                success, message = post_tweet(doc["text"])
+                success, message = post_tweet(doc["text"], doc.get("media_id"))
                 if success:
                     db.execute("UPDATE scheduled_posts SET posted = 1 WHERE id = ?", (doc["id"],))
                     record_post(doc["text"], "profile")
@@ -679,6 +787,7 @@ def resume_workers():
             return
         _resumed = True
     start_scheduler_if_needed()
+    studio.start_background()
     try:
         if setting_bool("auto_post_enabled"):
             start_worker("profile")
@@ -816,13 +925,13 @@ def build_calendar_items():
 @require_admin
 def index():
     queue = db.query(
-        "SELECT id, text, created_at FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC"
+        "SELECT id, text, created_at, media_id FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC"
     )
     history = _rows_with_times(db.query(
         "SELECT id, text, posted_at, type FROM post_history ORDER BY posted_at DESC, id DESC LIMIT 50"
     ), "posted_at")
     scheduled = _rows_with_times(db.query(
-        "SELECT id, text, scheduled_at FROM scheduled_posts WHERE posted = 0 ORDER BY scheduled_at ASC, id ASC"
+        "SELECT id, text, scheduled_at, media_id FROM scheduled_posts WHERE posted = 0 ORDER BY scheduled_at ASC, id ASC"
     ), "scheduled_at")
     communities = db.query(
         "SELECT c.id, c.name, "
@@ -889,6 +998,7 @@ def index():
         token_updated_at=tokens["updated_at"] if tokens else None,
         admin_protected=bool(ADMIN_TOKEN),
         page_data=page_data,
+        **studio.page_context(),
     ))
 
     # Persist admin token in a cookie if provided in the query string
@@ -972,7 +1082,7 @@ def post_next():
 @require_admin
 def post_specific_tweet(tweet_id):
     tid = parse_int_id(tweet_id)
-    tweet = db.query_one("SELECT id, text FROM tweet_queue WHERE id = ?", (tid,)) if tid is not None else None
+    tweet = db.query_one("SELECT id, text, media_id FROM tweet_queue WHERE id = ?", (tid,)) if tid is not None else None
     if not tweet:
         flash('Tweet not found in queue.', 'error')
         return redirect(url_for('index'))
@@ -1225,7 +1335,9 @@ def save_settings():
     else:
         problems.append('timezone')
 
-    for key in ("cost_per_post", "cost_per_link_post"):
+    studio.save_settings(form, problems)
+
+    for key in ("cost_per_post", "cost_per_link_post", "cost_per_read"):
         try:
             value = float(form.get(key, ''))
             if not 0 <= value <= 10:
@@ -1483,6 +1595,13 @@ def pause_community_auto_post():
 def stop_community_auto_posting():
     """Alias for pausing community auto-posting to match the frontend route."""
     return pause_community_auto_post()
+
+
+# AI studio, media library, and the Engage tab live in studio.py. It is loaded
+# last because it uses the helpers defined above.
+import studio  # noqa: E402
+
+studio.init(sys.modules[__name__])
 
 
 if __name__ == "__main__":

@@ -89,9 +89,56 @@ SCHEMA = [
         failed_at TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT 'profile'
     )""",
+    # Generated or uploaded images and videos. The bytes live in media_chunks as
+    # base64 text, split into small rows so they fit D1's per-value size limit.
+    """CREATE TABLE IF NOT EXISTS media (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT '',
+        prompt TEXT NOT NULL DEFAULT '',
+        size INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'ready',
+        error TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS media_chunks (
+        media_id INTEGER NOT NULL,
+        seq INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (media_id, seq)
+    )""",
+    # Accounts whose new posts show up in the Engage tab.
+    """CREATE TABLE IF NOT EXISTS watchlist (
+        user_id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        since_id TEXT NOT NULL DEFAULT '',
+        added_at TEXT NOT NULL
+    )""",
+    # Posts by watched accounts ("post") and posts that mention you ("mention").
+    """CREATE TABLE IF NOT EXISTS engage_items (
+        tweet_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        author_username TEXT NOT NULL,
+        text TEXT NOT NULL,
+        posted_at TEXT NOT NULL,
+        draft TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'new',
+        fetched_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_engage_status ON engage_items (status, posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_posted_at ON post_history (posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_failures_failed_at ON post_failures (failed_at)",
     "CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_posts (posted, scheduled_at)",
+]
+
+# Columns added after the first release. SQLite has no "ADD COLUMN IF NOT
+# EXISTS", so each one is attempted and a "duplicate column" error is ignored.
+MIGRATIONS = [
+    "ALTER TABLE tweet_queue ADD COLUMN media_id INTEGER",
+    "ALTER TABLE scheduled_posts ADD COLUMN media_id INTEGER",
 ]
 
 
@@ -219,6 +266,12 @@ def init():
 
     for statement in SCHEMA:
         backend.run(statement)
+    for statement in MIGRATIONS:
+        try:
+            backend.run(statement)
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                print(f"[db] Migration skipped ({statement}): {str(e)[:200]}")
     _load_settings_cache()
 
 
