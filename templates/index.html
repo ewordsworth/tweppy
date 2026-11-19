@@ -63,9 +63,19 @@
                 </li>
             </ul>
             <div class="sidebar-account">
-                {% if account.username %}
+                {% if accounts|length > 1 %}
+                    <form action="{{ url_for('switch_account') }}" method="POST" class="account-switch">
+                        <label for="account-switch"><i class="fa-brands fa-x-twitter"></i> Posting as</label>
+                        <select id="account-switch" name="account_key" onchange="this.form.next.value = location.hash ? '/' + location.hash : ''; this.form.submit();">
+                            {% for item in accounts %}
+                            <option value="{{ item.key }}" {% if item.key == account.key %}selected{% endif %}>@{{ item.username or 'unknown account' }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" name="next" value="">
+                    </form>
+                {% elif account.key %}
                     <i class="fa-brands fa-x-twitter"></i>
-                    <span>@{{ account.username }}</span>
+                    <span>@{{ account.username or 'account not checked' }}</span>
                 {% else %}
                     <i class="fa-solid fa-plug-circle-xmark"></i>
                     <span>No X account linked</span>

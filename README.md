@@ -11,6 +11,7 @@ You paste tweets in `[square brackets]`, and Tweppy posts them one at a time on 
 - **Communities.** Queue posts for an X Community, optionally retweeting each one to your profile.
 - **Create with AI.** Draft posts in your own voice with the OpenAI API, generate images (OpenAI or ImagineArt) and video (ImagineArt, including its hosted Kling models), or upload your own file, then attach it to a post.
 - **Engage.** Watch a list of accounts. Tweppy reads their new posts and your mentions, drafts a reply for each, and gives you one-tap Like, Reply and Quote buttons.
+- **Several X accounts.** Connect as many accounts as you like and switch between them; each keeps its own queue and auto-posts on its own.
 - **Analytics.** Posts per day and per hour, success rate, an X API spend estimate, and a plain-English error log.
 - **Quiet hours.** Auto-posting pauses overnight in your timezone.
 - **Safe defaults.** Duplicate tweets are skipped, failed posts back off instead of retrying every minute, and auto-posting resumes after a restart.
@@ -57,7 +58,9 @@ cp .env.example .env
 python authorize.py
 ```
 
-Open the address it prints, sign in to X with the account you want to post from, and approve the app. The tokens are saved to the database. You only need to do this once.
+Open the address it prints, sign in to X with the account you want to post from, and approve the app. The tokens are saved to the database. You only need to do this once per account.
+
+**More than one account.** Run `python authorize.py` again while signed in to X as the next account (or switch accounts on X's approval screen). Pick which account you are working with from **Posting as** in the sidebar, and disconnect accounts in **Settings**. Each account has its own queue, schedule, history, auto-posting, AI voice and Engage watchlist; posting intervals, quiet hours and the media library are shared. All accounts use the same X app, so they share its API credits.
 
 ### 5. Run the dashboard
 

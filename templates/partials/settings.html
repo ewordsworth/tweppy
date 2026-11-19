@@ -95,7 +95,7 @@
 
             <div class="card">
                 <h2><i class="fa-solid fa-wand-magic-sparkles"></i> AI writing and media</h2>
-                <label for="set-voice">Your voice</label>
+                <label for="set-voice">Your voice{% if account.username %} for @{{ account.username }}{% endif %}</label>
                 <textarea id="set-voice" name="ai_voice" rows="4" maxlength="2000"
                           placeholder="Who you are, what you post about, how you sound. Paste a few of your own posts as examples.">{{ settings.ai_voice }}</textarea>
                 <p class="hint">Used for every draft and reply. The more specific this is, the less the drafts sound generic.</p>
@@ -165,8 +165,8 @@
                 <h2><i class="fa-solid fa-plug"></i> Connections</h2>
                 <dl class="breakdown">
                     <div>
-                        <dt>X account</dt>
-                        <dd>{% if account.username %}@{{ account.username }}{% if account.name %} <span class="muted">({{ account.name }})</span>{% endif %}{% else %}<span class="muted">Not checked yet</span>{% endif %}</dd>
+                        <dt>Showing</dt>
+                        <dd>{% if account.key %}@{{ account.username or 'account not checked' }}{% if account.name %} <span class="muted">({{ account.name }})</span>{% endif %}{% else %}<span class="muted">No account connected</span>{% endif %}</dd>
                     </div>
                     <div>
                         <dt>Login token</dt>
@@ -183,6 +183,34 @@
                     <button type="submit" class="btn btn-secondary btn-small"><i class="fa-solid fa-rotate"></i> Re-check X account</button>
                 </form>
                 <p class="hint">Re-checking asks X who the token belongs to. That is one small paid read.</p>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-brands fa-x-twitter"></i> X accounts</h2>
+                <dl class="breakdown watch-list">
+                    {% for item in accounts %}
+                    <div>
+                        <dt>@{{ item.username or 'account not checked' }}{% if item.name %} <span class="muted">{{ item.name }}</span>{% endif %}{% if item.key == account.key %} <span class="type-badge type-community">showing</span>{% endif %}</dt>
+                        <dd class="row-actions">
+                            {% if item.key != account.key %}
+                            <form action="{{ url_for('switch_account') }}" method="POST">
+                                <input type="hidden" name="account_key" value="{{ item.key }}">
+                                <input type="hidden" name="next" value="/#settings">
+                                <button type="submit" class="btn btn-secondary btn-small">Switch</button>
+                            </form>
+                            {% endif %}
+                            <form action="{{ url_for('remove_account') }}" method="POST"
+                                  onsubmit="return confirm('Disconnect @{{ item.username or 'this account' }}? Its queue, scheduled posts and watchlist are deleted. Its post history is kept.');">
+                                <input type="hidden" name="account_key" value="{{ item.key }}">
+                                <button type="submit" class="btn btn-ghost-danger btn-small">Disconnect</button>
+                            </form>
+                        </dd>
+                    </div>
+                    {% else %}
+                    <p class="empty-message">No account connected yet.</p>
+                    {% endfor %}
+                </dl>
+                <p class="hint">To add an account, run <code>python authorize.py</code> on your computer while signed in to X as that account. Each account has its own queue, schedule, history, auto-posting, voice and watchlist. Posting intervals, quiet hours and the media library are shared.</p>
             </div>
 
             <div class="card">

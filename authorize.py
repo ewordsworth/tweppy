@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-One-time X (Twitter) authorization for Tweppy.
+Connect an X (Twitter) account to Tweppy.
 
 Run this on your own computer, open the printed address in a browser, and
 approve the app on X. The resulting access and refresh tokens are saved to the
 Tweppy database, after which the dashboard can post as that account.
+
+Run it again to connect another account: sign in to X as that account in the
+browser first (or switch accounts on X's approval screen). Connecting an
+account that is already connected just renews its tokens.
 
 Uses the OAuth 2.0 Authorization Code flow with PKCE (S256). The callback
 address must exactly match REDIRECT_URI in .env and the Callback URI configured
@@ -21,7 +25,7 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, request, session
 
-from rest import save_tokens, forget_account_info, refresh_account_info
+import rest
 
 load_dotenv()
 
@@ -68,8 +72,12 @@ def start():
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     })
-    return page("Connect your X account",
+    connected = [f"@{a['username']}" for a in rest.list_accounts(fresh=True) if a["username"]]
+    already = (f"<p>Already connected: {html.escape(', '.join(connected))}. To add another account, make sure "
+               "X is signed in to that account in this browser.</p>") if connected else ""
+    return page("Connect an X account",
                 "<p>Sign in to X with the account you want Tweppy to post as, then approve the app.</p>"
+                + already +
                 f"<p><a href='{html.escape(url, quote=True)}'>Authorize with X</a></p>")
 
 
@@ -104,17 +112,21 @@ def callback():
         return page("Could not get tokens", f"<pre>{html.escape(response.text)}</pre>"), 502
 
     tokens = response.json()
-    save_tokens(tokens["access_token"], tokens["refresh_token"])
-
-    # The new tokens may belong to a different account, so look it up again.
-    forget_account_info()
     try:
-        account = refresh_account_info(tokens["access_token"])
-        who = f"<p>Connected as <strong>@{html.escape(account.get('username', '?'))}</strong>.</p>"
+        account, is_new = rest.connect_account(tokens["access_token"], tokens["refresh_token"])
     except Exception as e:
-        who = f"<p>Tokens saved, but the account lookup failed: {html.escape(str(e))}</p>"
+        return page("Could not identify the account",
+                    "<p>X approved the app but would not say which account this is, so nothing was saved. "
+                    f"Check that your X API credits are not used up, then try again.</p><pre>{html.escape(str(e))}</pre>"), 502
 
-    return page("Connected", who + "<p>Tokens are saved. You can close this window and stop the script.</p>")
+    if account["username"]:
+        verb = "Connected" if is_new else "Renewed the connection for"
+        who = f"<p>{verb} <strong>@{html.escape(account['username'])}</strong>.</p>"
+    else:
+        who = "<p>Tokens saved, but the account lookup failed. Use Re-check X account in the dashboard's Settings.</p>"
+    total = len(rest.list_accounts(fresh=True))
+    return page("Connected", who + f"<p>{total} account(s) connected. To add another, sign in to X as that "
+                "account and <a href='/'>start again</a>. Otherwise you can close this window and stop the script.</p>")
 
 
 if __name__ == "__main__":

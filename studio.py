@@ -254,7 +254,16 @@ def studio_post():
 # ---------------------------------------------------------------------------
 
 _check_lock = threading.Lock()
-_last_error = None
+_last_errors = {}       # account key -> problems from that account's last check
+
+
+def _acct():
+    """Key of the current X account. The Engage tables are kept per account."""
+    return core.acct() or ""
+
+
+def _acct_setting(name):
+    return db.get_setting(f"{name}:{_acct()}")
 
 
 def _count_reads(n):
@@ -282,7 +291,8 @@ def _save_items(kind, tweets, authors):
     for tweet in tweets:
         tweet_id = str(tweet.get("id") or "")
         author_id = str(tweet.get("author_id") or "")
-        if not tweet_id or db.query_one("SELECT 1 AS x FROM engage_items WHERE tweet_id = ?", (tweet_id,)):
+        if not tweet_id or db.query_one("SELECT 1 AS x FROM engage_posts WHERE account_id = ? AND tweet_id = ?",
+                                           (_acct(), tweet_id)):
             continue
         row = {
             "tweet_id": tweet_id, "kind": kind, "author_id": author_id,
@@ -290,9 +300,9 @@ def _save_items(kind, tweets, authors):
             "posted_at": _x_time(tweet.get("created_at")),
         }
         db.execute(
-            "INSERT INTO engage_items (tweet_id, kind, author_id, author_username, text, posted_at, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (row["tweet_id"], kind, author_id, row["author_username"], row["text"], row["posted_at"], now),
+            "INSERT INTO engage_posts (account_id, tweet_id, kind, author_id, author_username, text, posted_at, "
+            "fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_acct(), row["tweet_id"], kind, author_id, row["author_username"], row["text"], row["posted_at"], now),
         )
         fresh.append(row)
     return fresh
@@ -301,18 +311,19 @@ def _save_items(kind, tweets, authors):
 def _draft(item):
     reply = ai.draft_reply(item["author_username"], item["text"],
                            core.setting("ai_voice"), _ai_setting("ai_text_model"))
-    db.execute("UPDATE engage_items SET draft = ? WHERE tweet_id = ?", (reply, item["tweet_id"]))
+    db.execute("UPDATE engage_posts SET draft = ? WHERE account_id = ? AND tweet_id = ?",
+               (reply, _acct(), item["tweet_id"]))
     return reply
 
 
 def check_now():
-    """Read new posts from watched accounts and new mentions. Returns (new_count, error)."""
-    global _last_error
+    """Read new posts from the current account's watchlist, and its mentions. Returns (new_count, error)."""
     if not _check_lock.acquire(blocking=False):
         return 0, "A check is already running."
     try:
         fresh, errors = [], []
-        watched = db.query("SELECT user_id, username, since_id FROM watchlist ORDER BY added_at ASC")
+        watched = db.query("SELECT user_id, username, since_id FROM watched_accounts WHERE account_id = ? "
+                           "ORDER BY added_at ASC", (_acct(),))
         watched_ids = {row["user_id"] for row in watched}
 
         for account in watched:
@@ -330,10 +341,11 @@ def check_now():
             fresh += _save_items("post", tweets, {account["user_id"]: account["username"]})
             newest = (data.get("meta") or {}).get("newest_id")
             if newest:
-                db.execute("UPDATE watchlist SET since_id = ? WHERE user_id = ?", (newest, account["user_id"]))
+                db.execute("UPDATE watched_accounts SET since_id = ? WHERE account_id = ? AND user_id = ?",
+                           (newest, _acct(), account["user_id"]))
 
         if core.setting_bool("engage_mentions"):
-            me = db.get_setting("x_user_id")
+            me = rest.get_account_info()["id"]
             if not me:
                 try:
                     me = rest.refresh_account_info().get("id")
@@ -342,7 +354,7 @@ def check_now():
             if me:
                 params = {"max_results": 10, "expansions": "author_id",
                           "user.fields": "username", "tweet.fields": "created_at,author_id"}
-                since = db.get_setting("engage_mentions_since")
+                since = _acct_setting("engage_mentions_since")
                 if since:
                     params["since_id"] = since
                 data, error = core.x_get(f"/users/{me}/mentions", params)
@@ -356,7 +368,7 @@ def check_now():
                     fresh += _save_items("mention", [t for t in tweets if str(t.get("author_id")) != str(me)], authors)
                     newest = (data.get("meta") or {}).get("newest_id")
                     if newest:
-                        db.set_setting("engage_mentions_since", newest)
+                        db.set_setting(f"engage_mentions_since:{_acct()}", newest)
 
         if ai.openai_ready() and core.setting_bool("engage_auto_draft"):
             for item in fresh[:DRAFTS_PER_CHECK]:
@@ -374,9 +386,9 @@ def check_now():
                     if not ok:
                         errors.append(f"Reply to @{item['author_username']}: {message}")
 
-        db.set_setting("engage_last_check", db.utcnow_str())
-        _last_error = "; ".join(errors)[:500] if errors else None
-        return len(fresh), _last_error
+        db.set_setting(f"engage_last_check:{_acct()}", db.utcnow_str())
+        _last_errors[_acct()] = "; ".join(errors)[:500] if errors else None
+        return len(fresh), _last_errors[_acct()]
     finally:
         _check_lock.release()
 
@@ -385,8 +397,8 @@ def _send_reply(item, text):
     ok, message = core.post_to_profile(text, reply_to=item["tweet_id"])
     if ok:
         core.record_post(text, "reply", count_in_stats=False)
-        db.execute("UPDATE engage_items SET status = 'replied', draft = ? WHERE tweet_id = ?",
-                   (text, item["tweet_id"]))
+        db.execute("UPDATE engage_posts SET status = 'replied', draft = ? WHERE account_id = ? AND tweet_id = ?",
+                   (text, _acct(), item["tweet_id"]))
     else:
         core.record_failure(text, message, "reply")
     return ok, message
@@ -398,10 +410,13 @@ def _engage_worker(stop):
         try:
             if core.setting_bool("engage_enabled"):
                 interval = timedelta(minutes=core.setting_int("engage_interval_minutes", 15, 24 * 60))
-                last = db.get_setting("engage_last_check")
-                if not last or core.utcnow() - db.parse_utc(last) >= interval:
-                    count, error = check_now()
-                    print(f"[engage] Checked: {count} new" + (f", problems: {error}" if error else ""))
+                for account in rest.list_accounts():
+                    rest.use_account(account["key"])
+                    last = _acct_setting("engage_last_check")
+                    if not last or core.utcnow() - db.parse_utc(last) >= interval:
+                        count, error = check_now()
+                        print(f"[engage] Checked @{account['username'] or account['key']}: {count} new"
+                              + (f", problems: {error}" if error else ""))
         except Exception as e:
             print(f"[engage] Error: {e}")
         stop.wait(60)
@@ -426,8 +441,9 @@ def start_background():
 
 def _item(tweet_id):
     return db.query_one(
-        "SELECT tweet_id, kind, author_id, author_username, text, draft, status FROM engage_items WHERE tweet_id = ?",
-        (str(tweet_id),),
+        "SELECT tweet_id, kind, author_id, author_username, text, draft, status FROM engage_posts "
+        "WHERE account_id = ? AND tweet_id = ?",
+        (_acct(), str(tweet_id)),
     )
 
 
@@ -440,7 +456,11 @@ def engage_watch():
     if not username or len(username) > 15 or not set(username) <= USERNAME_CHARS:
         flash("Enter an X handle, like @nasa.", "error")
         return _home("engage")
-    if db.query_one("SELECT 1 AS x FROM watchlist WHERE LOWER(username) = LOWER(?)", (username,)):
+    if not core.acct():
+        flash("Connect an X account first.", "error")
+        return _home("engage")
+    if db.query_one("SELECT 1 AS x FROM watched_accounts WHERE account_id = ? AND LOWER(username) = LOWER(?)",
+                    (_acct(), username)):
         flash(f"@{username} is already on the list.", "info")
         return _home("engage")
     data, error = core.x_get(f"/users/by/username/{username}", {"user.fields": "name"})
@@ -450,8 +470,9 @@ def engage_watch():
     _count_reads(1)
     user = data["data"]
     db.execute(
-        "INSERT OR REPLACE INTO watchlist (user_id, username, name, since_id, added_at) VALUES (?, ?, ?, '', ?)",
-        (str(user["id"]), user.get("username", username), user.get("name", ""), db.utcnow_str()),
+        "INSERT OR REPLACE INTO watched_accounts (account_id, user_id, username, name, since_id, added_at) "
+        "VALUES (?, ?, ?, ?, '', ?)",
+        (_acct(), str(user["id"]), user.get("username", username), user.get("name", ""), db.utcnow_str()),
     )
     flash(f"Now watching @{user.get('username', username)}.", "success")
     return _home("engage")
@@ -460,7 +481,7 @@ def engage_watch():
 @bp.route("/engage/unwatch/<user_id>", methods=["POST"])
 @admin
 def engage_unwatch(user_id):
-    db.execute("DELETE FROM watchlist WHERE user_id = ?", (user_id,))
+    db.execute("DELETE FROM watched_accounts WHERE account_id = ? AND user_id = ?", (_acct(), user_id))
     flash("Removed from the watchlist.", "info")
     return _home("engage")
 
@@ -494,8 +515,8 @@ def engage_status(tweet_id):
     status = body.get("status")
     if status not in ("new", "done", "dismissed"):
         return jsonify({"error": "bad status"}), 400
-    db.execute("UPDATE engage_items SET status = ?, draft = ? WHERE tweet_id = ?",
-               (status, (body.get("draft") or "")[:core.TWEET_MAX_CHARS], str(tweet_id)))
+    db.execute("UPDATE engage_posts SET status = ?, draft = ? WHERE account_id = ? AND tweet_id = ?",
+               (status, (body.get("draft") or "")[:core.TWEET_MAX_CHARS], _acct(), str(tweet_id)))
     return jsonify({"ok": True})
 
 
@@ -518,7 +539,7 @@ def engage_reply(tweet_id):
 @bp.route("/engage/clear", methods=["POST"])
 @admin
 def engage_clear():
-    db.execute("DELETE FROM engage_items WHERE status != 'new'")
+    db.execute("DELETE FROM engage_posts WHERE account_id = ? AND status != 'new'", (_acct(),))
     flash("Cleared handled posts.", "info")
     return _home("engage")
 
@@ -529,7 +550,7 @@ def engage_clear():
 
 def save_settings(form, problems):
     """Save this module's fields from the Settings form."""
-    db.set_setting("ai_voice", form.get("ai_voice", "").strip()[:2000])
+    core.put_setting("ai_voice", form.get("ai_voice", "").strip()[:2000])
     for key in ("ai_text_model", "ai_image_model", "imagineart_image_style", "imagineart_video_style"):
         db.set_setting(key, form.get(key, "").strip()[:80])
     for key in ("engage_enabled", "engage_mentions", "engage_auto_draft", "engage_auto_reply_mentions"):
@@ -545,18 +566,20 @@ def save_settings(form, problems):
 
 def page_context():
     """Extra template variables for the Create and Engage tabs."""
-    watchlist = db.query("SELECT user_id, username, name FROM watchlist ORDER BY added_at ASC")
+    watchlist = db.query("SELECT user_id, username, name FROM watched_accounts WHERE account_id = ? "
+                         "ORDER BY added_at ASC", (_acct(),))
     items = db.query(
-        "SELECT tweet_id, kind, author_username, text, posted_at, draft, status FROM engage_items "
-        "WHERE status = 'new' ORDER BY posted_at DESC LIMIT ?",
-        (ENGAGE_LIST_LIMIT,),
+        "SELECT tweet_id, kind, author_username, text, posted_at, draft, status FROM engage_posts "
+        "WHERE account_id = ? AND status = 'new' ORDER BY posted_at DESC LIMIT ?",
+        (_acct(), ENGAGE_LIST_LIMIT),
     )
     for item in items:
         item["posted_at"] = db.parse_utc(item["posted_at"])
-    handled = db.query_one("SELECT COUNT(*) AS n FROM engage_items WHERE status != 'new'")["n"]
+    handled = db.query_one("SELECT COUNT(*) AS n FROM engage_posts WHERE account_id = ? AND status != 'new'",
+                           (_acct(),))["n"]
     reads_row = db.query_one("SELECT value FROM bot_stats WHERE key = 'reads_count'")
     reads = reads_row["value"] if reads_row else 0
-    last = db.get_setting("engage_last_check")
+    last = _acct_setting("engage_last_check")
     return {
         "ai_openai": ai.openai_ready(),
         "ai_imagineart": ai.imagineart_ready(),
@@ -569,7 +592,7 @@ def page_context():
         "engage_items": items,
         "engage_handled": handled,
         "engage_last_check": db.parse_utc(last) if last else None,
-        "engage_error": _last_error,
+        "engage_error": _last_errors.get(_acct()),
         "engage_reads": reads,
         "engage_read_spend": reads * core.setting_float("cost_per_read"),
         "engage_intervals": [(m, core.humanize_minutes(m)) for m in ENGAGE_INTERVALS],

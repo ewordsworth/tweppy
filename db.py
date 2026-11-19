@@ -108,17 +108,20 @@ SCHEMA = [
         data TEXT NOT NULL,
         PRIMARY KEY (media_id, seq)
     )""",
-    # Accounts whose new posts show up in the Engage tab.
-    """CREATE TABLE IF NOT EXISTS watchlist (
-        user_id TEXT PRIMARY KEY,
+    # Accounts whose new posts show up in the Engage tab, per connected account.
+    """CREATE TABLE IF NOT EXISTS watched_accounts (
+        account_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
         username TEXT NOT NULL,
         name TEXT NOT NULL DEFAULT '',
         since_id TEXT NOT NULL DEFAULT '',
-        added_at TEXT NOT NULL
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, user_id)
     )""",
     # Posts by watched accounts ("post") and posts that mention you ("mention").
-    """CREATE TABLE IF NOT EXISTS engage_items (
-        tweet_id TEXT PRIMARY KEY,
+    """CREATE TABLE IF NOT EXISTS engage_posts (
+        account_id TEXT NOT NULL,
+        tweet_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         author_id TEXT NOT NULL,
         author_username TEXT NOT NULL,
@@ -126,9 +129,13 @@ SCHEMA = [
         posted_at TEXT NOT NULL,
         draft TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'new',
-        fetched_at TEXT NOT NULL
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, tweet_id)
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_engage_status ON engage_items (status, posted_at)",
+    # Single-account versions of the two tables above, from before they were per account.
+    "DROP TABLE IF EXISTS watchlist",
+    "DROP TABLE IF EXISTS engage_items",
+    "CREATE INDEX IF NOT EXISTS idx_engage_posts ON engage_posts (account_id, status, posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_posted_at ON post_history (posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_failures_failed_at ON post_failures (failed_at)",
     "CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_posts (posted, scheduled_at)",
@@ -139,6 +146,17 @@ SCHEMA = [
 MIGRATIONS = [
     "ALTER TABLE tweet_queue ADD COLUMN media_id INTEGER",
     "ALTER TABLE scheduled_posts ADD COLUMN media_id INTEGER",
+    # More than one X account: each tokens row is an account, and rows that
+    # belong to an account carry its key (see rest.py).
+    "ALTER TABLE tokens ADD COLUMN x_user_id TEXT",
+    "ALTER TABLE tokens ADD COLUMN username TEXT",
+    "ALTER TABLE tokens ADD COLUMN name TEXT",
+    "ALTER TABLE tokens ADD COLUMN checked_at TEXT",
+    "ALTER TABLE tweet_queue ADD COLUMN account_id TEXT",
+    "ALTER TABLE scheduled_posts ADD COLUMN account_id TEXT",
+    "ALTER TABLE post_history ADD COLUMN account_id TEXT",
+    "ALTER TABLE post_failures ADD COLUMN account_id TEXT",
+    "ALTER TABLE community_tweet_queue ADD COLUMN account_id TEXT",
 ]
 
 

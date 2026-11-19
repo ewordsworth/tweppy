@@ -125,13 +125,32 @@ def known_timezones():
     return _timezones
 
 
-def setting(key):
-    value = db.get_setting(key)
+def acct():
+    """Key of the X account this thread is working with (see rest.use_account)."""
+    return rest.current_account_id()
+
+
+def setting(key, account=None):
+    """A saved setting. A few (rest.ACCOUNT_SETTINGS) are kept once per X account."""
+    if key in rest.ACCOUNT_SETTINGS:
+        account = account or acct()
+        value = db.get_setting(f"{key}:{account}") if account else None
+    else:
+        value = db.get_setting(key)
     return DEFAULT_SETTINGS.get(key) if value is None else value
 
 
-def setting_bool(key):
-    return setting(key) == "1"
+def put_setting(key, value, account=None):
+    if key in rest.ACCOUNT_SETTINGS:
+        account = account or acct()
+        if not account:
+            return
+        key = f"{key}:{account}"
+    db.set_setting(key, value)
+
+
+def setting_bool(key, account=None):
+    return setting(key, account) == "1"
 
 
 def setting_int(key, minimum, maximum):
@@ -252,13 +271,14 @@ def has_link(text):
 def record_post(text, post_type="profile", count_in_stats=True):
     """Add a post to history and, for profile posts, bump the posted counter."""
     db.execute(
-        "INSERT INTO post_history (text, posted_at, type) VALUES (?, ?, ?)",
-        (text, db.utcnow_str(), post_type),
+        "INSERT INTO post_history (text, posted_at, type, account_id) VALUES (?, ?, ?, ?)",
+        (text, db.utcnow_str(), post_type, acct()),
     )
     if count_in_stats:
         db.execute(
-            "INSERT INTO bot_stats (key, value) VALUES ('posted_count', 1) "
-            "ON CONFLICT(key) DO UPDATE SET value = value + 1"
+            "INSERT INTO bot_stats (key, value) VALUES (?, 1) "
+            "ON CONFLICT(key) DO UPDATE SET value = value + 1",
+            (f"posted_count:{acct()}",),
         )
 
 
@@ -266,8 +286,8 @@ def record_failure(text, error, post_type="profile"):
     """Log a failed post attempt so the dashboard can explain what went wrong."""
     try:
         db.execute(
-            "INSERT INTO post_failures (text, error, failed_at, type) VALUES (?, ?, ?, ?)",
-            (text, error, db.utcnow_str(), post_type),
+            "INSERT INTO post_failures (text, error, failed_at, type, account_id) VALUES (?, ?, ?, ?, ?)",
+            (text, error, db.utcnow_str(), post_type, acct()),
         )
         db.execute(
             "DELETE FROM post_failures WHERE id NOT IN "
@@ -278,13 +298,15 @@ def record_failure(text, error, post_type="profile"):
 
 
 def last_post_time(post_type):
-    row = db.query_one("SELECT MAX(posted_at) AS t FROM post_history WHERE type = ?", (post_type,))
+    row = db.query_one("SELECT MAX(posted_at) AS t FROM post_history WHERE type = ? AND account_id IS ?",
+                       (post_type, acct()))
     return db.parse_utc(row["t"]) if row and row.get("t") else None
 
 
 def get_queue_stats():
-    unposted = db.query_one("SELECT COUNT(*) AS n FROM tweet_queue WHERE posted = 0")["n"]
-    row = db.query_one("SELECT value FROM bot_stats WHERE key = 'posted_count'")
+    unposted = db.query_one(
+        "SELECT COUNT(*) AS n FROM tweet_queue WHERE posted = 0 AND account_id IS ?", (acct(),))["n"]
+    row = db.query_one("SELECT value FROM bot_stats WHERE key = ?", (f"posted_count:{acct()}",))
     posted = row["value"] if row else 0
     return {"total": unposted + posted, "unposted": unposted, "posted": posted}
 
@@ -292,11 +314,12 @@ def get_queue_stats():
 def latest_problem():
     """The newest failure, if it happened after the newest successful post."""
     failure = db.query_one(
-        "SELECT text, error, failed_at, type FROM post_failures ORDER BY failed_at DESC, id DESC LIMIT 1"
+        "SELECT text, error, failed_at, type FROM post_failures WHERE account_id IS ? "
+        "ORDER BY failed_at DESC, id DESC LIMIT 1", (acct(),)
     )
     if not failure:
         return None
-    success = db.query_one("SELECT MAX(posted_at) AS t FROM post_history")
+    success = db.query_one("SELECT MAX(posted_at) AS t FROM post_history WHERE account_id IS ?", (acct(),))
     if success and success.get("t") and success["t"] >= failure["failed_at"]:
         return None
     failure["failed_at"] = db.parse_utc(failure["failed_at"])
@@ -322,15 +345,16 @@ def drop_duplicates(texts, community_id=None):
         placeholders = ", ".join("?" * len(chunk))
         if community_id is None:
             rows = db.query(
-                f"SELECT text FROM tweet_queue WHERE text IN ({placeholders}) "
-                f"UNION SELECT text FROM post_history WHERE text IN ({placeholders})",
-                chunk + chunk,
+                f"SELECT text FROM tweet_queue WHERE account_id IS ? AND text IN ({placeholders}) "
+                f"UNION SELECT text FROM post_history WHERE account_id IS ? AND text IN ({placeholders})",
+                [acct()] + chunk + [acct()] + chunk,
             )
         else:
             rows = db.query(
-                f"SELECT text FROM community_tweet_queue WHERE community_id = ? AND text IN ({placeholders}) "
-                f"UNION SELECT text FROM post_history WHERE text IN ({placeholders})",
-                [community_id] + chunk + chunk,
+                f"SELECT text FROM community_tweet_queue WHERE community_id = ? AND account_id IS ? "
+                f"AND text IN ({placeholders}) "
+                f"UNION SELECT text FROM post_history WHERE account_id IS ? AND text IN ({placeholders})",
+                [community_id, acct()] + chunk + [acct()] + chunk,
             )
         existing.update(row["text"] for row in rows)
     fresh = [t for t in unique if t not in existing]
@@ -339,14 +363,15 @@ def drop_duplicates(texts, community_id=None):
 
 def add_tweets_to_queue(tweets, media_id=None):
     now = db.utcnow_str()
-    return db.insert_many("tweet_queue", ("text", "created_at", "media_id"),
-                          [(t, now, media_id) for t in tweets])
+    return db.insert_many("tweet_queue", ("text", "created_at", "media_id", "account_id"),
+                          [(t, now, media_id, acct()) for t in tweets])
 
 
 def get_next_tweet():
     """Next unposted tweet: random or oldest-first, per Settings."""
     order = "RANDOM()" if setting("queue_order") == "random" else "created_at ASC, id ASC"
-    return db.query_one(f"SELECT id, text, media_id FROM tweet_queue WHERE posted = 0 ORDER BY {order} LIMIT 1")
+    return db.query_one(f"SELECT id, text, media_id FROM tweet_queue WHERE posted = 0 AND account_id IS ? "
+                        f"ORDER BY {order} LIMIT 1", (acct(),))
 
 
 def mark_tweet_posted(tweet_id, tweet_text):
@@ -359,8 +384,8 @@ def mark_tweet_posted(tweet_id, tweet_text):
 def schedule_rows(items, media_id=None):
     """Insert scheduled posts. items: list of (text, aware_utc_datetime)."""
     now = db.utcnow_str()
-    rows = [(text, db.to_db_str(when), now, media_id) for text, when in items]
-    return db.insert_many("scheduled_posts", ("text", "scheduled_at", "created_at", "media_id"), rows)
+    rows = [(text, db.to_db_str(when), now, media_id, acct()) for text, when in items]
+    return db.insert_many("scheduled_posts", ("text", "scheduled_at", "created_at", "media_id", "account_id"), rows)
 
 
 # ---------------------------------------------------------------------------
@@ -378,16 +403,16 @@ def get_community(community_id):
 
 def add_tweets_to_community_queue(tweets, community_id):
     now = db.utcnow_str()
-    rows = [(t, community_id, now) for t in tweets]
-    return db.insert_many("community_tweet_queue", ("text", "community_id", "created_at"), rows)
+    rows = [(t, community_id, now, acct()) for t in tweets]
+    return db.insert_many("community_tweet_queue", ("text", "community_id", "created_at", "account_id"), rows)
 
 
 def get_next_community_tweet(community_id):
     """Get the oldest unposted tweet for a specific community."""
     return db.query_one(
         "SELECT id, text, community_id FROM community_tweet_queue "
-        "WHERE community_id = ? AND posted = 0 ORDER BY created_at ASC, id ASC LIMIT 1",
-        (community_id,),
+        "WHERE community_id = ? AND account_id IS ? AND posted = 0 ORDER BY created_at ASC, id ASC LIMIT 1",
+        (community_id, acct()),
     )
 
 
@@ -616,20 +641,25 @@ def publish_community_item(item):
 # from Settings on every loop, so changes apply without a restart.
 # ---------------------------------------------------------------------------
 
-_worker_lock = threading.Lock()
-workers = {
-    "profile": {"active": False, "stop": threading.Event(), "state": "Stopped",
-                "next_at": None, "community_id": None, "community_name": None},
-    "community": {"active": False, "stop": threading.Event(), "state": "Stopped",
-                  "next_at": None, "community_id": None, "community_name": None},
-}
+_worker_lock = threading.RLock()
+workers = {}    # (kind, account key) -> worker state; kind is "profile" or "community"
 
 
-def _set_state(kind, stop, state, next_at=None):
+def get_worker(kind, account=None):
+    """State of one account's worker (default: the current account), created on first use."""
+    key = (kind, account or acct())
+    with _worker_lock:
+        if key not in workers:
+            workers[key] = {"active": False, "stop": threading.Event(), "state": "Stopped",
+                            "next_at": None, "community_id": None, "community_name": None}
+        return workers[key]
+
+
+def _set_state(worker, stop, state, next_at=None):
     # Ignore updates from a worker that has already been replaced.
-    if workers[kind]["stop"] is stop:
-        workers[kind]["state"] = state
-        workers[kind]["next_at"] = next_at
+    if worker["stop"] is stop:
+        worker["state"] = state
+        worker["next_at"] = next_at
 
 
 def _backoff(failures):
@@ -637,7 +667,10 @@ def _backoff(failures):
     return timedelta(minutes=min(30, 2 ** max(0, failures - 1)))
 
 
-def _run_worker(kind, stop, fetch_next, publish, label):
+def _run_worker(kind, account, stop, fetch_next, publish, label):
+    rest.use_account(account)       # everything this thread does is for this account
+    worker = get_worker(kind, account)
+    label = f"{label} @{rest.get_account_info(account)['username'] or account}"
     print(f"[{label}] Worker started.")
     post_type = "community" if kind == "community" else "profile"
     try:
@@ -656,23 +689,23 @@ def _run_worker(kind, stop, fetch_next, publish, label):
             if retrying:
                 due = retry_at
             if now < due:
-                _set_state(kind, stop, "Retrying after an error" if retrying else "Waiting for next post", due)
+                _set_state(worker, stop, "Retrying after an error" if retrying else "Waiting for next post", due)
                 stop.wait(min(30, (due - now).total_seconds()))
                 continue
 
             quiet_end = quiet_until(now)
             if quiet_end:
-                _set_state(kind, stop, "Paused for quiet hours", quiet_end)
+                _set_state(worker, stop, "Paused for quiet hours", quiet_end)
                 stop.wait(min(60, (quiet_end - now).total_seconds()))
                 continue
 
             item = fetch_next()
             if not item:
-                _set_state(kind, stop, "Queue is empty", None)
+                _set_state(worker, stop, "Queue is empty", None)
                 stop.wait(IDLE_POLL)
                 continue
 
-            _set_state(kind, stop, "Posting", now)
+            _set_state(worker, stop, "Posting", now)
             ok, message = publish(item)
             if ok:
                 last_post = utcnow()
@@ -688,7 +721,7 @@ def _run_worker(kind, stop, fetch_next, publish, label):
             retry_at = utcnow() + _backoff(failures)
             stop.wait(RETRY_INTERVAL)
 
-    _set_state(kind, stop, "Stopped", None)
+    _set_state(worker, stop, "Stopped", None)
     print(f"[{label}] Worker stopped.")
 
 
@@ -697,10 +730,13 @@ def _community_publish_for_worker(item):
     return ok, message
 
 
-def start_worker(kind, community=None):
-    """Start a worker if it isn't running. Returns True if it was started."""
+def start_worker(kind, community=None, account=None):
+    """Start an account's worker if it isn't running. Returns True if it was started."""
+    account = account or acct()
+    if not account:
+        return False
     with _worker_lock:
-        worker = workers[kind]
+        worker = get_worker(kind, account)
         if worker["active"]:
             return False
         stop = threading.Event()
@@ -708,19 +744,19 @@ def start_worker(kind, community=None):
                       community_id=community["id"] if community else None,
                       community_name=community["name"] if community else None)
         if kind == "profile":
-            args = (kind, stop, get_next_tweet, publish_profile_item, "auto-post")
+            args = (kind, account, stop, get_next_tweet, publish_profile_item, "auto-post")
         else:
             community_id = community["id"]
-            args = (kind, stop, lambda: get_next_community_tweet(community_id),
+            args = (kind, account, stop, lambda: get_next_community_tweet(community_id),
                     _community_publish_for_worker, "community-auto-post")
         threading.Thread(target=_run_worker, args=args, daemon=True).start()
         return True
 
 
-def stop_worker(kind):
-    """Stop a worker if it is running. Returns True if it was stopped."""
+def stop_worker(kind, account=None):
+    """Stop an account's worker if it is running. Returns True if it was stopped."""
     with _worker_lock:
-        worker = workers[kind]
+        worker = get_worker(kind, account)
         if not worker["active"]:
             return False
         worker["stop"].set()
@@ -741,7 +777,7 @@ def scheduler_worker(stop):
         try:
             now = utcnow()
             due = db.query(
-                "SELECT id, text, media_id FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
+                "SELECT id, text, media_id, account_id FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
                 "ORDER BY scheduled_at ASC, id ASC",
                 (db.to_db_str(now),),
             )
@@ -749,6 +785,7 @@ def scheduler_worker(stop):
                 failures, retry_at = _scheduler_retry.get(doc["id"], (0, None))
                 if retry_at and retry_at > now:
                     continue
+                rest.use_account(doc.get("account_id"))     # post as the account it was scheduled for
                 success, message = post_tweet(doc["text"], doc.get("media_id"))
                 if success:
                     db.execute("UPDATE scheduled_posts SET posted = 1 WHERE id = ?", (doc["id"],))
@@ -789,14 +826,16 @@ def resume_workers():
     start_scheduler_if_needed()
     studio.start_background()
     try:
-        if setting_bool("auto_post_enabled"):
-            start_worker("profile")
-            print("[startup] Resumed profile auto-posting.")
-        if setting_bool("community_auto_post_enabled"):
-            community = get_community(setting("community_auto_post_id"))
-            if community:
-                start_worker("community", community)
-                print(f"[startup] Resumed community auto-posting for {community['name']}.")
+        for account in rest.list_accounts():
+            key, who = account["key"], account["username"] or account["key"]
+            if setting_bool("auto_post_enabled", key):
+                start_worker("profile", account=key)
+                print(f"[startup] Resumed profile auto-posting for @{who}.")
+            if setting_bool("community_auto_post_enabled", key):
+                community = get_community(setting("community_auto_post_id", key))
+                if community:
+                    start_worker("community", community, account=key)
+                    print(f"[startup] Resumed community auto-posting for {community['name']} as @{who}.")
     except Exception as e:
         print(f"[startup] Could not resume auto-posting: {e}")
 
@@ -804,6 +843,8 @@ def resume_workers():
 @app.before_request
 def _ensure_workers_running():
     resume_workers()
+    # Every query in this request is for the account picked in the sidebar.
+    rest.use_account(session.get("account_key"))
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +860,7 @@ def _rows_with_times(rows, *fields):
 
 
 def worker_status(kind):
-    worker = workers[kind]
+    worker = get_worker(kind)
     return {
         "active": worker["active"],
         "state": worker["state"],
@@ -838,17 +879,17 @@ def build_analytics(queue_count):
     week_start = today - timedelta(days=6)
 
     posts = db.query(
-        "SELECT text, posted_at, type FROM post_history WHERE posted_at >= ?",
-        (db.to_db_str(start_utc),),
+        "SELECT text, posted_at, type FROM post_history WHERE posted_at >= ? AND account_id IS ?",
+        (db.to_db_str(start_utc), acct()),
     )
     failures_30 = db.query_one(
-        "SELECT COUNT(*) AS n FROM post_failures WHERE failed_at >= ?",
-        (db.to_db_str(start_utc),),
+        "SELECT COUNT(*) AS n FROM post_failures WHERE failed_at >= ? AND account_id IS ?",
+        (db.to_db_str(start_utc), acct()),
     )["n"]
     all_time = db.query_one(
         "SELECT COUNT(*) AS n, "
         "COALESCE(SUM(CASE WHEN type = 'community' THEN 1 ELSE 0 END), 0) AS community "
-        "FROM post_history"
+        "FROM post_history WHERE account_id IS ?", (acct(),)
     )
 
     per_day = {day: 0 for day in days}
@@ -906,8 +947,8 @@ def build_calendar_items():
     since = db.to_db_str(utcnow() - timedelta(days=90))
     rows = db.query(
         "SELECT id, text, scheduled_at, posted FROM scheduled_posts "
-        "WHERE posted = 0 OR scheduled_at >= ? ORDER BY scheduled_at ASC, id ASC",
-        (since,),
+        "WHERE account_id IS ? AND (posted = 0 OR scheduled_at >= ?) ORDER BY scheduled_at ASC, id ASC",
+        (acct(), since),
     )
     return [{
         "id": row["id"],
@@ -925,21 +966,26 @@ def build_calendar_items():
 @require_admin
 def index():
     queue = db.query(
-        "SELECT id, text, created_at, media_id FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC"
+        "SELECT id, text, created_at, media_id FROM tweet_queue WHERE posted = 0 AND account_id IS ? "
+        "ORDER BY created_at ASC, id ASC", (acct(),)
     )
     history = _rows_with_times(db.query(
-        "SELECT id, text, posted_at, type FROM post_history ORDER BY posted_at DESC, id DESC LIMIT 50"
+        "SELECT id, text, posted_at, type FROM post_history WHERE account_id IS ? "
+        "ORDER BY posted_at DESC, id DESC LIMIT 50", (acct(),)
     ), "posted_at")
     scheduled = _rows_with_times(db.query(
-        "SELECT id, text, scheduled_at, media_id FROM scheduled_posts WHERE posted = 0 ORDER BY scheduled_at ASC, id ASC"
+        "SELECT id, text, scheduled_at, media_id FROM scheduled_posts WHERE posted = 0 AND account_id IS ? "
+        "ORDER BY scheduled_at ASC, id ASC", (acct(),)
     ), "scheduled_at")
     communities = db.query(
         "SELECT c.id, c.name, "
-        "(SELECT COUNT(*) FROM community_tweet_queue q WHERE q.community_id = c.id AND q.posted = 0) AS queued "
-        "FROM communities c ORDER BY c.created_at ASC, c.id ASC"
+        "(SELECT COUNT(*) FROM community_tweet_queue q WHERE q.community_id = c.id AND q.posted = 0 "
+        "AND q.account_id IS ?) AS queued "
+        "FROM communities c ORDER BY c.created_at ASC, c.id ASC", (acct(),)
     )
     failures = _rows_with_times(db.query(
-        "SELECT text, error, failed_at, type FROM post_failures ORDER BY failed_at DESC, id DESC LIMIT 15"
+        "SELECT text, error, failed_at, type FROM post_failures WHERE account_id IS ? "
+        "ORDER BY failed_at DESC, id DESC LIMIT 15", (acct(),)
     ), "failed_at")
 
     active_community = get_community(session.get("active_community_id"))
@@ -947,12 +993,12 @@ def index():
     if active_community:
         community_queue = db.query(
             "SELECT id, text, created_at FROM community_tweet_queue "
-            "WHERE community_id = ? AND posted = 0 ORDER BY created_at ASC, id ASC",
-            (active_community["id"],),
+            "WHERE community_id = ? AND account_id IS ? AND posted = 0 ORDER BY created_at ASC, id ASC",
+            (active_community["id"], acct()),
         )
     community_post_history = _rows_with_times(db.query(
-        "SELECT id, text, posted_at FROM post_history WHERE type = 'community' "
-        "ORDER BY posted_at DESC, id DESC LIMIT 50"
+        "SELECT id, text, posted_at FROM post_history WHERE type = 'community' AND account_id IS ? "
+        "ORDER BY posted_at DESC, id DESC LIMIT 50", (acct(),)
     ), "posted_at")
 
     stats = get_queue_stats()
@@ -980,8 +1026,8 @@ def index():
         next_scheduled=scheduled[0] if scheduled else None,
         db_connected=db.connected,
         db_backend=db.backend_name,
-        posting_active=workers["profile"]["active"],
-        community_posting_active=workers["community"]["active"],
+        posting_active=get_worker("profile")["active"],
+        community_posting_active=get_worker("community")["active"],
         profile_worker=worker_status("profile"),
         community_worker=worker_status("community"),
         communities=communities,
@@ -995,6 +1041,7 @@ def index():
         interval_choices=[(m, humanize_minutes(m)) for m in INTERVAL_CHOICES],
         timezones=known_timezones(),
         account=rest.get_account_info(),
+        accounts=rest.list_accounts(),
         token_updated_at=tokens["updated_at"] if tokens else None,
         admin_protected=bool(ADMIN_TOKEN),
         page_data=page_data,
@@ -1127,8 +1174,8 @@ def update_tweet(tweet_id):
 @app.route('/clear_queue', methods=['POST'])
 @require_admin
 def clear_queue():
-    count = db.query_one("SELECT COUNT(*) AS n FROM tweet_queue")["n"]
-    db.execute("DELETE FROM tweet_queue")
+    count = db.query_one("SELECT COUNT(*) AS n FROM tweet_queue WHERE account_id IS ?", (acct(),))["n"]
+    db.execute("DELETE FROM tweet_queue WHERE account_id IS ?", (acct(),))
     flash(f'Cleared {count} tweets from queue', 'info')
     return redirect(url_for('index'))
 
@@ -1136,8 +1183,8 @@ def clear_queue():
 @app.route('/clear_history', methods=['POST'])
 @require_admin
 def clear_history():
-    count = db.query_one("SELECT COUNT(*) AS n FROM post_history")["n"]
-    db.execute("DELETE FROM post_history")
+    count = db.query_one("SELECT COUNT(*) AS n FROM post_history WHERE account_id IS ?", (acct(),))["n"]
+    db.execute("DELETE FROM post_history WHERE account_id IS ?", (acct(),))
     flash(f'Cleared {count} tweets from history.', 'info')
     return redirect(url_for('index'))
 
@@ -1146,8 +1193,8 @@ def clear_history():
 @require_admin
 def clear_stats():
     db.execute(
-        "INSERT INTO bot_stats (key, value) VALUES ('posted_count', 0) "
-        "ON CONFLICT(key) DO UPDATE SET value = 0"
+        "INSERT INTO bot_stats (key, value) VALUES (?, 0) "
+        "ON CONFLICT(key) DO UPDATE SET value = 0", (f"posted_count:{acct()}",)
     )
     flash('Statistics have been reset.', 'info')
     return redirect(url_for('index'))
@@ -1156,8 +1203,8 @@ def clear_stats():
 @app.route('/clear_failures', methods=['POST'])
 @require_admin
 def clear_failures():
-    count = db.query_one("SELECT COUNT(*) AS n FROM post_failures")["n"]
-    db.execute("DELETE FROM post_failures")
+    count = db.query_one("SELECT COUNT(*) AS n FROM post_failures WHERE account_id IS ?", (acct(),))["n"]
+    db.execute("DELETE FROM post_failures WHERE account_id IS ?", (acct(),))
     flash(f'Cleared {count} logged error(s).', 'info')
     return redirect(url_for('index'))
 
@@ -1165,7 +1212,7 @@ def clear_failures():
 @app.route('/start_auto_posting', methods=['POST'])
 @require_admin
 def start_auto_posting():
-    db.set_setting("auto_post_enabled", "1")
+    put_setting("auto_post_enabled", "1")
     if start_worker("profile"):
         flash(f'Auto-posting started. Posting every {humanize_minutes(interval_minutes("profile"))}.', 'success')
     else:
@@ -1176,7 +1223,7 @@ def start_auto_posting():
 @app.route('/stop_auto_posting', methods=['POST'])
 @require_admin
 def stop_auto_posting():
-    db.set_setting("auto_post_enabled", "0")
+    put_setting("auto_post_enabled", "0")
     stop_worker("profile")
     flash('Auto-posting stopped.', 'info')
     return redirect(url_for('index'))
@@ -1353,6 +1400,37 @@ def save_settings():
     return redirect(url_for('index'))
 
 
+@app.route('/account/switch', methods=['POST'])
+@require_admin
+def switch_account():
+    """Choose which connected X account the dashboard shows and posts as."""
+    key = request.form.get('account_key', '')
+    if key in [account["key"] for account in rest.list_accounts(fresh=True)]:
+        session['account_key'] = key
+        session.pop('active_community_id', None)
+    else:
+        flash('That account is no longer connected.', 'error')
+    return redirect(request.form.get('next') if (request.form.get('next') or '').startswith('/#') else url_for('index'))
+
+
+@app.route('/account/remove', methods=['POST'])
+@require_admin
+def remove_account():
+    """Disconnect an X account. Its queue and schedule go with it; its history is kept."""
+    key = request.form.get('account_key', '')
+    info = rest.get_account_info(key)
+    if not info["key"]:
+        flash('That account is no longer connected.', 'error')
+        return redirect(url_for('index'))
+    stop_worker("profile", key)
+    stop_worker("community", key)
+    rest.remove_account(key)
+    if session.get('account_key') == key:
+        session.pop('account_key', None)
+    flash(f'Disconnected @{info["username"] or key}.', 'info')
+    return redirect(url_for('index') + '#settings')
+
+
 @app.route('/account/refresh', methods=['POST'])
 @require_admin
 def refresh_account():
@@ -1373,7 +1451,8 @@ def _csv_safe(value):
 @app.route('/export/history.csv')
 @require_admin
 def export_history():
-    rows = db.query("SELECT posted_at, type, text FROM post_history ORDER BY posted_at DESC, id DESC")
+    rows = db.query("SELECT posted_at, type, text FROM post_history WHERE account_id IS ? "
+                    "ORDER BY posted_at DESC, id DESC", (acct(),))
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["posted_at_utc", "type", "text"])
@@ -1386,7 +1465,8 @@ def export_history():
 @app.route('/export/queue.txt')
 @require_admin
 def export_queue():
-    rows = db.query("SELECT text FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC")
+    rows = db.query("SELECT text FROM tweet_queue WHERE posted = 0 AND account_id IS ? "
+                    "ORDER BY created_at ASC, id ASC", (acct(),))
     body = "\n".join(f"[{row['text']}]" for row in rows) + ("\n" if rows else "")
     return Response(body, mimetype="text/plain",
                     headers={"Content-Disposition": "attachment; filename=tweppy-queue.txt"})
@@ -1429,11 +1509,15 @@ def delete_community(community_id):
     if not community:
         flash('Community not found.', 'error')
         return redirect(url_for('index'))
-    if workers["community"]["active"] and workers["community"]["community_id"] == community_id:
-        stop_worker("community")
-        db.set_setting("community_auto_post_enabled", "0")
-    if setting("community_auto_post_id") == community_id:
-        db.set_setting("community_auto_post_id", "")
+    # Any connected account may be auto-posting to this community.
+    for account in rest.list_accounts():
+        key = account["key"]
+        worker = get_worker("community", key)
+        if worker["active"] and worker["community_id"] == community_id:
+            stop_worker("community", key)
+            put_setting("community_auto_post_enabled", "0", key)
+        if setting("community_auto_post_id", key) == community_id:
+            put_setting("community_auto_post_id", "", key)
     removed = db.query_one(
         "SELECT COUNT(*) AS n FROM community_tweet_queue WHERE community_id = ?", (community_id,)
     )["n"]
@@ -1554,10 +1638,11 @@ def clear_community_queue():
         flash('No active community set. Please set one before clearing queue.', 'error')
         return redirect(url_for('index'))
     count = db.query_one(
-        "SELECT COUNT(*) AS n FROM community_tweet_queue WHERE community_id = ?",
-        (active_community['id'],),
+        "SELECT COUNT(*) AS n FROM community_tweet_queue WHERE community_id = ? AND account_id IS ?",
+        (active_community['id'], acct()),
     )["n"]
-    db.execute("DELETE FROM community_tweet_queue WHERE community_id = ?", (active_community['id'],))
+    db.execute("DELETE FROM community_tweet_queue WHERE community_id = ? AND account_id IS ?",
+               (active_community['id'], acct()))
     flash(f'Cleared {count} tweets from community queue', 'info')
     return redirect(url_for('index'))
 
@@ -1565,15 +1650,15 @@ def clear_community_queue():
 @app.route('/start_community_auto_post', methods=['POST'])
 @require_admin
 def start_community_auto_post():
-    if workers["community"]["active"]:
+    if get_worker("community")["active"]:
         flash('Community auto-posting is already running.', 'info')
         return redirect(url_for('index'))
     active_community = get_community(session.get('active_community_id'))
     if not active_community:
         flash('Set an active community before starting auto-posting.', 'error')
         return redirect(url_for('index'))
-    db.set_setting("community_auto_post_enabled", "1")
-    db.set_setting("community_auto_post_id", active_community["id"])
+    put_setting("community_auto_post_enabled", "1")
+    put_setting("community_auto_post_id", active_community["id"])
     start_worker("community", active_community)
     flash(f'Community auto-posting started for {active_community["name"]}.', 'success')
     return redirect(url_for('index'))
@@ -1582,7 +1667,7 @@ def start_community_auto_post():
 @app.route('/pause_community_auto_post', methods=['POST'])
 @require_admin
 def pause_community_auto_post():
-    db.set_setting("community_auto_post_enabled", "0")
+    put_setting("community_auto_post_enabled", "0")
     if stop_worker("community"):
         flash('Community auto-posting paused.', 'success')
     else:
