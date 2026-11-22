@@ -24,6 +24,13 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#ai" class="nav-link" data-tab="ai-content">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>AI Studio</span>
+                        {% if ai.drafts %}<span class="nav-badge">{{ ai.drafts|length }}</span>{% endif %}
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#analytics" class="nav-link" data-tab="analytics-content">
                         <i class="fa-solid fa-chart-simple"></i>
                         <span>Analytics</span>
@@ -81,6 +88,7 @@
             </div>
 
             {% include 'partials/dashboard.html' %}
+            {% include 'partials/ai.html' %}
             {% include 'partials/analytics.html' %}
             {% include 'partials/scheduler.html' %}
             {% include 'partials/communities.html' %}

@@ -31,7 +31,8 @@ REDIRECT_URI = os.getenv("REDIRECT_URI", "http://127.0.0.1:8080/callback")
 
 AUTHORIZE_URL = "https://x.com/i/oauth2/authorize"
 TOKEN_URL = "https://api.x.com/2/oauth2/token"
-SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"]
+# media.write lets Tweppy attach AI-generated images to posts.
+SCOPES = ["tweet.read", "tweet.write", "users.read", "media.write", "offline.access"]
 
 callback_path = urlparse(REDIRECT_URI).path or "/callback"
 

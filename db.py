@@ -89,10 +89,58 @@ SCHEMA = [
         failed_at TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT 'profile'
     )""",
+    # ---- AI Studio ----
+    # Generated images, stored as base64 text split across rows: D1 caps a
+    # single value at 2 MB, and hosts with temporary disks would lose a file.
+    """CREATE TABLE IF NOT EXISTS media (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        prompt TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS media_chunks (
+        media_id INTEGER NOT NULL,
+        seq INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (media_id, seq)
+    )""",
+    """CREATE TABLE IF NOT EXISTS image_presets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        prompt TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS ai_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        wants_image INTEGER NOT NULL DEFAULT 0,
+        image_prompt TEXT NOT NULL DEFAULT '',
+        preset_id INTEGER,
+        media_id INTEGER,
+        image_status TEXT NOT NULL DEFAULT 'none',
+        image_error TEXT NOT NULL DEFAULT '',
+        suggested_at TEXT,
+        reason TEXT NOT NULL DEFAULT '',
+        origin TEXT NOT NULL DEFAULT 'manual',
+        auto_approve INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_history_posted_at ON post_history (posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_failures_failed_at ON post_failures (failed_at)",
     "CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_posts (posted, scheduled_at)",
 ]
+
+# Columns added after the first release: (table, column, declaration).
+MIGRATIONS = [
+    ("tweet_queue", "media_id", "INTEGER"),
+    ("scheduled_posts", "media_id", "INTEGER"),
+    ("post_history", "has_media", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+MEDIA_CHUNK_CHARS = 400_000
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +267,12 @@ def init():
 
     for statement in SCHEMA:
         backend.run(statement)
+    for table, column, declaration in MIGRATIONS:
+        try:
+            backend.run(f"SELECT {column} FROM {table} LIMIT 1")
+        except Exception:
+            # The column is missing on a database created by an older version.
+            backend.run(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
     _load_settings_cache()
 
 
@@ -259,6 +313,46 @@ def insert_many(table, columns, rows, chunk_size=40):
         params = [value for row in batch for value in row]
         execute(f"INSERT INTO {table} ({column_list}) VALUES {placeholders}", params)
     return len(rows)
+
+
+# ---------------------------------------------------------------------------
+# Media (generated images)
+# ---------------------------------------------------------------------------
+
+def save_media(raw, mime, prompt=""):
+    """Store image bytes and return the new media id."""
+    import base64
+    meta = execute(
+        "INSERT INTO media (mime, size, prompt, created_at) VALUES (?, ?, ?, ?)",
+        (mime, len(raw), prompt[:2000], utcnow_str()),
+    )
+    media_id = meta.get("last_row_id")
+    encoded = base64.b64encode(raw).decode("ascii")
+    for seq, start in enumerate(range(0, len(encoded), MEDIA_CHUNK_CHARS)):
+        execute(
+            "INSERT INTO media_chunks (media_id, seq, data) VALUES (?, ?, ?)",
+            (media_id, seq, encoded[start:start + MEDIA_CHUNK_CHARS]),
+        )
+    return media_id
+
+
+def load_media(media_id):
+    """Return (bytes, mime) for a stored image, or None if it is gone."""
+    import base64
+    row = query_one("SELECT mime FROM media WHERE id = ?", (media_id,))
+    if not row:
+        return None
+    chunks = query("SELECT data FROM media_chunks WHERE media_id = ? ORDER BY seq ASC", (media_id,))
+    if not chunks:
+        return None
+    return base64.b64decode("".join(chunk["data"] for chunk in chunks)), row["mime"]
+
+
+def delete_media(media_id):
+    if media_id is None:
+        return
+    execute("DELETE FROM media_chunks WHERE media_id = ?", (media_id,))
+    execute("DELETE FROM media WHERE id = ?", (media_id,))
 
 
 # ---------------------------------------------------------------------------

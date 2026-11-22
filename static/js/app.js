@@ -537,6 +537,79 @@
         renderCalendar();
     }
 
+    /* ------------------------------------------------------------------ *
+     * AI Studio: draft and preset editing, and a poll that reloads the page
+     * when background writing or image making finishes.
+     * ------------------------------------------------------------------ */
+
+    function initAI() {
+        document.addEventListener('click', e => {
+            const edit = e.target.closest('.js-edit-draft');
+            if (edit) {
+                $('#edit-draft-form').action = edit.getAttribute('data-action');
+                const area = $('#edit-draft-text');
+                area.value = edit.getAttribute('data-text');
+                updatePreview(area);
+                const iso = edit.getAttribute('data-iso');
+                $('#edit-draft-datetime').value = iso ? localInputValue(new Date(iso)) : '';
+                $('#edit-draft-datetime-utc').value = '';
+                openModal('edit-draft-modal');
+                return;
+            }
+            const image = e.target.closest('.js-draft-image');
+            if (image) {
+                $('#draft-image-form').action = image.getAttribute('data-action');
+                $('#draft-image-prompt').value = image.getAttribute('data-prompt');
+                $('#draft-image-preset').value = image.getAttribute('data-preset');
+                $('#draft-image-remove').hidden = !image.getAttribute('data-has-image');
+                openModal('draft-image-modal');
+                return;
+            }
+            const preset = e.target.closest('.js-edit-preset');
+            if (preset) {
+                $('#preset-id').value = preset.getAttribute('data-id');
+                $('#preset-name').value = preset.getAttribute('data-name');
+                $('#preset-category').value = preset.getAttribute('data-category');
+                $('#preset-prompt').value = preset.getAttribute('data-prompt');
+                $('#preset-form-title').textContent = 'Edit preset';
+                $('#preset-submit').textContent = 'Save preset';
+                $('#preset-cancel').hidden = false;
+                $('#preset-name').focus();
+            }
+        });
+        const cancel = $('#preset-cancel');
+        if (cancel) cancel.addEventListener('click', () => {
+            $('#preset-form').reset();
+            $('#preset-id').value = '';
+            $('#preset-form-title').textContent = 'Add a preset';
+            $('#preset-submit').textContent = 'Add preset';
+            cancel.hidden = true;
+        });
+
+        const start = PAGE.ai || {};
+        const working = status => Boolean(status.busy) || status.pendingImages > 0;
+        const expecting = $$('.alert-info').some(a => /shortly/.test(a.textContent));
+        if (!working(start) && !expecting) return;
+        let polls = 0;
+        const timer = setInterval(async () => {
+            polls += 1;
+            let now;
+            try {
+                const response = await fetch('/api/ai/status', { credentials: 'same-origin' });
+                if (!response.ok) return;
+                now = await response.json();
+            } catch (err) { return; }
+            const changed = now.drafts !== start.drafts || now.pendingImages !== start.pendingImages;
+            const idle = !working(now) && polls > 2;
+            const editing = document.activeElement && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
+            if ((changed || idle) && !editing && !$('.modal.open')) {
+                clearInterval(timer);
+                location.reload();
+            }
+            if (polls > 200) clearInterval(timer);
+        }, 3000);
+    }
+
     /* ------------------------------------------------------------------ */
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -547,6 +620,7 @@
         initForms();
         initPreviews();
         initCalendar();
+        initAI();
         renderTimestamps();
         tickCountdowns();
         setInterval(tickCountdowns, 1000);
