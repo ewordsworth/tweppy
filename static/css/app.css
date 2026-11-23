@@ -150,7 +150,7 @@ a.btn-secondary { color: var(--text-color); }
 .main-content textarea, .modal textarea,
 .main-content input[type=text], .main-content input:not([type]), .main-content input[type=number],
 .main-content input[type=time], .main-content input[type=datetime-local],
-.modal input[type=datetime-local], .main-content select {
+.modal input[type=datetime-local], .main-content select, .modal select {
     width: 100%;
     background-color: var(--bg-color);
     border: 1px solid var(--border-color);
@@ -392,6 +392,23 @@ code { background: var(--bg-color); border: 1px solid var(--border-color); borde
 .preset-body p { flex-basis: 100%; font-size: 0.85rem; line-height: 1.4; overflow-wrap: anywhere; }
 .preset-form { border-top: 1px solid var(--border-color); padding-top: 1rem; }
 .preset-form h3 { font-size: 1rem; }
+
+.own-draft { margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem; }
+.own-draft summary { cursor: pointer; color: var(--text-secondary); font-size: 0.9rem; }
+.own-draft form { margin-top: 1rem; }
+.upload-form { margin-top: 1.25rem; border-top: 1px solid var(--border-color); padding-top: 1rem; }
+input[type=file] { color: var(--text-secondary); font-size: 0.85rem; font-family: inherit; max-width: 100%; }
+.top-posts { margin: 0.5rem 0 0 1.1rem; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.45; display: flex; flex-direction: column; gap: 0.4rem; }
+
+.mention { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.1rem 0; border-bottom: 1px solid var(--border-color); }
+.mention:first-child { padding-top: 0; }
+.mention:last-child { border-bottom: none; padding-bottom: 0; }
+.mention-author { color: var(--text-color); font-weight: 600; text-decoration: none; }
+.mention-author:hover { text-decoration: underline; }
+.mention-text { border-left: 3px solid var(--border-color); padding: 0.1rem 0 0.1rem 0.8rem; color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mention-failed { border-color: rgba(220, 53, 69, 0.55); color: #ff9aa3; }
+.mention textarea { min-height: 64px; }
+.type-reply { border-color: rgba(29, 161, 242, 0.5); }
 
 .thumb { flex: 0 0 48px; }
 .thumb img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; display: block; border: 1px solid var(--border-color); }

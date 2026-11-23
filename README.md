@@ -7,6 +7,7 @@ You paste tweets in `[square brackets]`, and Tweppy posts them one at a time on 
 ## Features
 
 - **AI Studio.** An OpenAI or Gemini model writes posts in your voice and makes images for them. You set the tone, topics, how often posts carry an image, and image presets (a category such as animals, humans or places, your own prompt, or both). Review drafts yourself, or turn on autopilot and it plans each day and picks the posting times.
+- **Replies.** Reads new mentions, drafts an answer in your voice or decides to skip, and can like the mentions it answers. Review each reply or let it send on its own, with a daily limit.
 - **Queue and auto-post.** Add many tweets at once, then post one every 30 minutes to 24 hours, in random or oldest-first order.
 - **Scheduler.** A month calendar, single scheduled posts, and bulk scheduling that spaces tweets out from a start time.
 - **Communities.** Queue posts for an X Community, optionally retweeting each one to your profile.
@@ -75,7 +76,17 @@ AI Studio is optional. Add `OPENAI_API_KEY`, `GEMINI_API_KEY`, or both to `.env`
 - **Image presets** limit pictures to the kinds you want. While at least one preset is on, every image uses one.
 - **Autopilot** writes each day's posts once a day. By default they wait for your review; you can let it post without review.
 
-Images are stored in the database until their post goes out, then deleted. Posting images needs the `media.write` permission, so run `python authorize.py` again if you connected X before this feature existed.
+- **Communities.** Compose, your own drafts and autopilot can all target a saved X Community instead of your profile.
+- **Your own drafts and images.** Write a draft yourself and attach your own JPEG, PNG, WebP or GIF, or swap the image on any AI draft for one of yours.
+- **Learn from engagement.** Optionally reads your recent posts and their likes, reposts and replies once a day, then favours the hours and styles that did best.
+
+### Replies
+
+The **Replies** tab fetches mentions of your account on an interval you choose. For each one the text model drafts a reply or skips it (spam, abuse, complaints that need a person, anything it is unsure about). By default every reply waits for you; you can edit it, ask for a new draft, like the mention or skip it. Mentions are treated as untrusted text: the model is told never to follow instructions inside them.
+
+Reading mentions and post statistics are paid X API reads, so both are off until you turn them on.
+
+Images are stored in the database until their post goes out, then deleted. Posting images needs the `media.write` permission and liking needs `like.write`, so run `python authorize.py` again if you connected X before these features existed.
 
 Run the tests with `python -m pytest tests`.
 

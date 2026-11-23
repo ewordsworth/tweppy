@@ -11,8 +11,9 @@ you add them.
 |---|---|---|---|---|
 | 1 | `OPENAI_API_KEY` | GPT text and GPT Image | https://platform.openai.com/api-keys | Needed (or #2) |
 | 2 | `GEMINI_API_KEY` | Gemini text and Gemini images | https://aistudio.google.com/apikey | Needed (or #1) |
-| 3 | X `media.write` permission | Posting images | Run `python authorize.py` again and approve | Needed for image posts |
-| 4 | X API credits | Every post and image upload | X developer console | Already needed today |
+| 3 | X permissions `media.write` and `like.write` | Posting images, liking mentions | Run `python authorize.py` again and approve (once covers both) | Needed for images and likes |
+| 4 | X API credits | Every post, reply, image upload, and every read (mentions, post stats) | X developer console | Already needed today; reads are new |
+| 5 | X API access that allows reads | Replies tab, engagement learning | X developer console, your app's plan | To confirm |
 
 Notes:
 
@@ -45,6 +46,12 @@ Everything below was tested only against a stand-in server.
 - [ ] **One real image post to X.** The upload uses `POST /2/media/upload` and
       then attaches the result to the post. Use "Post now" on a draft with an
       image.
+- [ ] **One real mentions check.** Press **Check now** in the Replies tab. It
+      calls `GET /2/users/:id/mentions`. If X answers 403, your app's plan does
+      not include reads, or the token is missing a permission.
+- [ ] **One real reply and one like** from the Replies tab.
+- [ ] **One engagement read.** Press **Refresh** under "What works for you" in
+      AI Studio. It calls `GET /2/users/:id/tweets` with public metrics.
 
 ## 3. Decisions for you
 
@@ -54,19 +61,24 @@ Everything below was tested only against a stand-in server.
 - **Posts per day, format mix and posting window** start at 3 a day, 30% with
   an image, between 08:00 and 21:00 in the timezone set in Settings. Set the
   timezone first; it defaults to UTC.
-- **Spend.** Each batch of posts is one text request, and each image is one
-  image request. Images cost far more than text. AI Studio shows how many
-  requests have been made, but not their price. Set a monthly limit in the
-  OpenAI and Google consoles.
+- **Automatic replies.** Off by default. When on, replies wait for your
+  review unless you untick "Review replies before they are sent". The limit
+  starts at 20 replies in 24 hours and mentions are checked hourly. Write your
+  own rules under "How should it reply?", for example where to send order
+  problems.
+- **Engagement learning.** Off by default because it is a paid read once a
+  day. It needs at least 10 posts before it changes anything.
+- **Spend.** Each batch of posts or replies is one text request, and each
+  image is one image request. AI Studio shows request counts and a rough
+  dollar figure worked out from two per-request costs that you enter under
+  Models (they start as placeholders, not real prices). Set a monthly limit in
+  the OpenAI and Google consoles as well. X charges separately for posts and
+  reads.
 
-## 4. Not built yet
+## 4. Not built
 
-- **Replying and other interaction** (answering mentions, liking, quoting).
-  This needs paid X read access to fetch mentions, plus rules for what the bot
-  may answer on its own. Tell me if you want it and how hands-off it should be.
-- **Timing from your own numbers.** "AI picks the best times" relies on what
-  the model knows about your audience and timezone. It does not read your
-  account's engagement, because that also needs paid X read access.
-- **AI posts into Communities.** Drafts go to the profile queue or schedule.
-- **Video, GIFs and several images per post.** One still image per post.
-- **Uploading your own images.** Images come from the image model only.
+- **Video, and several images on one post.** One image (still or GIF) per post.
+- **Quote posts and reposting other accounts.** Replies and likes only.
+- **Replies inside Communities and direct messages.** Mentions only.
+- **Following or unfollowing accounts.** Left out on purpose; automated
+  follow activity is the quickest way to get an account restricted.

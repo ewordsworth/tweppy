@@ -1,0 +1,183 @@
+<!-- Replies Tab -->
+<div id="replies-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>Replies</h1>
+            <p class="page-subtitle">Tweppy reads new mentions of your account and drafts an answer in your voice, or decides to leave it alone.</p>
+        </div>
+    </header>
+
+    {% if engage.last_error %}
+    <div class="problem-banner" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div>
+            <strong>The last check had a problem.</strong>
+            <span>{{ engage.last_error }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="status-strip">
+        <div class="status-tile">
+            <span class="status-label">Replies</span>
+            {% if engage.enabled %}
+                <span class="status-value"><span class="dot online"></span> On</span>
+                <span class="status-sub">{{ 'You review each reply' if engage.review else 'Sent without review' }}</span>
+            {% else %}
+                <span class="status-value"><span class="dot offline"></span> Off</span>
+                <span class="status-sub">Mentions are not fetched</span>
+            {% endif %}
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Waiting for you</span>
+            <span class="status-value">{{ engage.inbox|length }}</span>
+            <span class="status-sub">Drafted replies and problems</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Replied in 24 hours</span>
+            <span class="status-value">{{ engage.replied_today }}</span>
+            <span class="status-sub">Limit {{ engage.cap }}</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Last check</span>
+            <span class="status-value ai-model">{% if engage.last_check_at %}<span class="ts" data-iso="{{ engage.last_check_at.isoformat() }}"></span>{% else %}Never{% endif %}</span>
+            <span class="status-sub">Every {{ engage.intervals|selectattr(0, 'equalto', engage.prefs.engage_interval_minutes|int)|map(attribute=1)|first }} when on</span>
+        </div>
+    </div>
+
+    <div class="dashboard-left-right-container ai-layout">
+        <div class="dashboard-left">
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-inbox"></i> Mentions to handle ({{ engage.inbox|length }})</h2>
+                    <form action="{{ url_for('engage_check') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary btn-small" title="One paid read from X"><i class="fa-solid fa-rotate"></i> Check now</button>
+                    </form>
+                </div>
+                <div class="draft-list">
+                    {% for mention in engage.inbox %}
+                    <article class="mention">
+                        <div class="tweet-meta">
+                            <a class="mention-author" href="https://x.com/{{ mention.author_username }}/status/{{ mention.id }}" target="_blank" rel="noopener noreferrer">
+                                {{ mention.author_name or mention.author_username }} <span class="muted">@{{ mention.author_username }}</span>
+                            </a>
+                            {% if mention.posted_at %}<span class="muted ts" data-iso="{{ mention.posted_at.isoformat() }}"></span>{% endif %}
+                            {% if mention.liked %}<span class="type-badge">Liked</span>{% endif %}
+                            {% if mention.status == 'new' %}<span class="type-badge"><i class="fa-solid fa-spinner fa-spin"></i> Drafting</span>{% endif %}
+                            {% if mention.status == 'failed' %}<span class="type-badge mention-failed">Needs attention</span>{% endif %}
+                        </div>
+                        <blockquote class="mention-text">{{ mention.text }}</blockquote>
+                        {% if mention.status == 'failed' and mention.note %}<p class="error-text">{{ mention.note }}</p>
+                        {% elif mention.note %}<p class="draft-reason"><i class="fa-regular fa-lightbulb"></i> {{ mention.note }}</p>{% endif %}
+                        <form action="{{ url_for('engage_send', mention_id=mention.id) }}" method="POST" class="stacked-form">
+                            <label for="reply-{{ mention.id }}">Your reply</label>
+                            <textarea id="reply-{{ mention.id }}" name="reply_text" rows="2" maxlength="280" required data-preview="reply-preview-{{ mention.id }}" data-single="1" placeholder="Write a reply, or ask for a new draft.">{{ mention.reply_text }}</textarea>
+                            <div id="reply-preview-{{ mention.id }}" class="tweet-preview"></div>
+                            <div class="action-row draft-actions">
+                                <button type="submit" class="btn btn-primary btn-small"><i class="fa-solid fa-reply"></i> Send reply</button>
+                                <button type="submit" class="btn btn-secondary btn-small" formaction="{{ url_for('engage_redraft', mention_id=mention.id) }}" formnovalidate><i class="fa-solid fa-wand-magic-sparkles"></i> New draft</button>
+                                {% if not mention.liked %}
+                                <button type="submit" class="btn btn-secondary btn-small" formaction="{{ url_for('engage_like', mention_id=mention.id) }}" formnovalidate><i class="fa-regular fa-heart"></i> Like</button>
+                                {% endif %}
+                                <button type="submit" class="btn btn-ghost-danger btn-small" formaction="{{ url_for('engage_skip', mention_id=mention.id) }}" formnovalidate>Skip</button>
+                            </div>
+                        </form>
+                    </article>
+                    {% else %}
+                    <p class="empty-message">{% if engage.enabled %}Nothing waiting. New mentions will show up here.{% else %}Turn replies on, or press Check now, to fetch mentions.{% endif %}</p>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-clock-rotate-left"></i> Handled ({{ engage.handled|length }})</h2>
+                    {% if engage.handled %}
+                    <form action="{{ url_for('engage_clear') }}" method="POST" onsubmit="return confirm('Clear the handled list? Replies already sent stay on X.');">
+                        <button type="submit" class="btn btn-ghost-danger btn-small">Clear</button>
+                    </form>
+                    {% endif %}
+                </div>
+                <div class="draft-list">
+                    {% for mention in engage.handled %}
+                    <article class="mention">
+                        <div class="tweet-meta">
+                            <a class="mention-author" href="https://x.com/{{ mention.author_username }}/status/{{ mention.id }}" target="_blank" rel="noopener noreferrer"><span class="muted">@{{ mention.author_username }}</span></a>
+                            <span class="type-badge {{ 'type-upcoming' if mention.status == 'replied' }}">{{ 'Replied' if mention.status == 'replied' else 'Skipped' }}</span>
+                            {% if mention.handled_at %}<span class="muted ts" data-iso="{{ mention.handled_at.isoformat() }}"></span>{% endif %}
+                        </div>
+                        <blockquote class="mention-text">{{ mention.text }}</blockquote>
+                        {% if mention.status == 'replied' %}
+                        <p class="draft-text"><i class="fa-solid fa-reply muted"></i> {{ mention.reply_text }}</p>
+                        {% else %}
+                        <p class="draft-reason">{{ mention.note }}</p>
+                        <form action="{{ url_for('engage_redraft', mention_id=mention.id) }}" method="POST">
+                            <button type="submit" class="btn btn-secondary btn-small">Draft a reply anyway</button>
+                        </form>
+                        {% endif %}
+                    </article>
+                    {% else %}
+                    <p class="empty-message">Nothing handled yet.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-right">
+            <div class="card">
+                <h2><i class="fa-solid fa-comments"></i> Automatic replies</h2>
+                <p class="hint">When on, Tweppy checks X for new mentions on the interval below. Each check is a paid read, and each reply is a paid post.</p>
+                <div class="action-row">
+                    <form action="{{ url_for('engage_toggle') }}" method="POST">
+                        {% if engage.enabled %}
+                        <input type="hidden" name="enabled" value="0">
+                        <button type="submit" class="btn btn-warning"><i class="fa-solid fa-pause"></i> Turn replies off</button>
+                        {% else %}
+                        <input type="hidden" name="enabled" value="1">
+                        <button type="submit" class="btn btn-success" {% if not ai.any_key %}disabled{% endif %}><i class="fa-solid fa-play"></i> Turn replies on</button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+
+            <form action="{{ url_for('engage_settings') }}" method="POST" class="settings-form">
+                <div class="card">
+                    <h2><i class="fa-solid fa-sliders"></i> Reply settings</h2>
+                    <div class="stacked-form">
+                        <div class="form-row">
+                            <div>
+                                <label for="engage-interval">Check for mentions</label>
+                                <select id="engage-interval" name="engage_interval_minutes">
+                                    {% for minutes, label in engage.intervals %}
+                                    <option value="{{ minutes }}" {% if minutes|string == engage.prefs.engage_interval_minutes %}selected{% endif %}>Every {{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="engage-cap">Most replies in 24 hours</label>
+                                <input id="engage-cap" type="number" name="engage_max_per_day" min="1" max="{{ engage.max_per_day }}" value="{{ engage.prefs.engage_max_per_day }}" required>
+                            </div>
+                        </div>
+                        <label for="engage-instructions">How should it reply?</label>
+                        <textarea id="engage-instructions" name="engage_instructions" rows="3" maxlength="2000" placeholder="e.g. Thank people warmly. Send order problems to support@example.com. Never argue.">{{ engage.prefs.engage_instructions }}</textarea>
+                        <label for="engage-ignore">Never reply to these accounts</label>
+                        <input id="engage-ignore" name="engage_ignore" maxlength="1000" value="{{ engage.prefs.engage_ignore }}" placeholder="@name, @another">
+                        <label class="toggle">
+                            <input type="checkbox" name="engage_require_approval" value="1" {% if engage.review %}checked{% endif %}>
+                            <span>Review replies before they are sent</span>
+                        </label>
+                        <p class="hint">With this off, drafted replies are sent on their own, up to the limit above. The AI still skips spam, abuse and anything it is unsure about.</p>
+                        <label class="toggle">
+                            <input type="checkbox" name="engage_auto_like" value="1" {% if engage.prefs.engage_auto_like == '1' %}checked{% endif %}>
+                            <span>Like the mentions it answers</span>
+                        </label>
+                        <p class="hint">Replies use the voice, tone and "never mention" list from AI Studio.</p>
+                    </div>
+                </div>
+                <div class="settings-save">
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save reply settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

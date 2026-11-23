@@ -96,5 +96,12 @@
         <button type="submit" name="action" value="make" class="btn btn-primary">Make image</button>
       </div>
     </form>
+    <form id="draft-upload-form" method="POST" enctype="multipart/form-data" class="stacked-form upload-form">
+      <label for="draft-upload-file">Or use your own image <span class="muted">(JPEG, PNG, WebP or GIF)</span></label>
+      <input id="draft-upload-file" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-secondary">Upload and attach</button>
+      </div>
+    </form>
   </div>
 </div>

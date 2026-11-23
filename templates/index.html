@@ -31,6 +31,13 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="#replies" class="nav-link" data-tab="replies-content">
+                        <i class="fa-solid fa-reply"></i>
+                        <span>Replies</span>
+                        {% if engage.inbox %}<span class="nav-badge">{{ engage.inbox|length }}</span>{% endif %}
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="#analytics" class="nav-link" data-tab="analytics-content">
                         <i class="fa-solid fa-chart-simple"></i>
                         <span>Analytics</span>
@@ -89,6 +96,7 @@
 
             {% include 'partials/dashboard.html' %}
             {% include 'partials/ai.html' %}
+            {% include 'partials/engage.html' %}
             {% include 'partials/analytics.html' %}
             {% include 'partials/scheduler.html' %}
             {% include 'partials/communities.html' %}

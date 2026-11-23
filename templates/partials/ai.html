@@ -49,12 +49,12 @@
         <div class="status-tile">
             <span class="status-label">Text model</span>
             <span class="status-value ai-model">{{ ai.text_model or 'None' }}</span>
-            <span class="status-sub">{{ ai.providers[ai.text_provider] if ai.text_provider else 'No key' }} · {{ ai.text_calls }} requests so far</span>
+            <span class="status-sub">{{ ai.providers[ai.text_provider] if ai.text_provider else 'No key' }} · {{ ai.text_calls }} requests, about ${{ '%.2f'|format(ai.text_spend) }}</span>
         </div>
         <div class="status-tile">
             <span class="status-label">Image model</span>
             <span class="status-value ai-model">{{ ai.image_model or 'None' }}</span>
-            <span class="status-sub">{{ ai.providers[ai.image_provider] if ai.image_provider else 'No key' }} · {{ ai.image_calls }} images so far</span>
+            <span class="status-sub">{{ ai.providers[ai.image_provider] if ai.image_provider else 'No key' }} · {{ ai.image_calls }} images, about ${{ '%.2f'|format(ai.image_spend) }}</span>
         </div>
     </div>
 
@@ -89,6 +89,13 @@
                             </select>
                         </div>
                     </div>
+                    {% if ai.communities %}
+                    <label for="ai-compose-destination">Post to</label>
+                    <select id="ai-compose-destination" name="community_id">
+                        <option value="">My profile</option>
+                        {% for community in ai.communities %}<option value="{{ community.id }}">Community: {{ community.name }}</option>{% endfor %}
+                    </select>
+                    {% endif %}
                     <label class="toggle">
                         <input type="checkbox" name="with_times" value="1" checked>
                         <span>Suggest a posting time for each one</span>
@@ -98,6 +105,36 @@
                     </div>
                 </form>
                 <p class="hint">Nothing is posted from here. Drafts land below for you to review. Each image costs more than a text request.</p>
+
+                <details class="own-draft">
+                    <summary>Or write a draft yourself, with your own image</summary>
+                    <form action="{{ url_for('ai_draft_new') }}" method="POST" enctype="multipart/form-data" class="stacked-form js-utc-form">
+                        <label for="own-text">Post</label>
+                        <textarea id="own-text" name="text" rows="3" required data-preview="own-preview" data-single="1"></textarea>
+                        <div id="own-preview" class="tweet-preview"></div>
+                        <div class="form-row">
+                            <div>
+                                <label for="own-image">Image <span class="muted">(optional; JPEG, PNG, WebP or GIF)</span></label>
+                                <input id="own-image" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif">
+                            </div>
+                            <div>
+                                <label for="own-at">Post at <span class="muted">(optional)</span></label>
+                                <input id="own-at" name="suggested_at" type="datetime-local" data-utc-target="own-at-utc">
+                                <input type="hidden" id="own-at-utc" name="suggested_at_utc">
+                            </div>
+                        </div>
+                        {% if ai.communities %}
+                        <label for="own-destination">Post to</label>
+                        <select id="own-destination" name="community_id">
+                            <option value="">My profile</option>
+                            {% for community in ai.communities %}<option value="{{ community.id }}">Community: {{ community.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-plus"></i> Add draft</button>
+                        </div>
+                    </form>
+                </details>
             </div>
 
             <div class="card">
@@ -138,7 +175,9 @@
                                 {% endif %}
                                 <span class="type-badge">{{ 'Image + caption' if draft.wants_image else 'Text' }}</span>
                                 {% if draft.preset_name %}<span class="type-badge">{{ draft.preset_name }}</span>{% endif %}
+                                {% if draft.community_name %}<span class="type-badge type-community"><i class="fa-solid fa-users"></i> {{ draft.community_name }}</span>{% endif %}
                                 {% if draft.origin == 'autopilot' %}<span class="type-badge">Autopilot</span>{% endif %}
+                                {% if draft.origin == 'own' %}<span class="type-badge">Written by you</span>{% endif %}
                                 <span class="count {% if draft.length > 280 %}over{% endif %}">{{ draft.length }}/280</span>
                             </div>
                             <p class="draft-text">{{ draft.text }}</p>
@@ -165,6 +204,7 @@
                                         data-iso="{{ draft.suggested_at.isoformat() if draft.suggested_at else '' }}"><i class="fa-solid fa-pencil"></i> Edit</button>
                                 <button type="button" class="btn btn-secondary btn-small js-draft-image"
                                         data-action="{{ url_for('ai_draft_image', draft_id=draft.id) }}"
+                                        data-upload="{{ url_for('ai_draft_upload', draft_id=draft.id) }}"
                                         data-prompt="{{ draft.image_prompt }}"
                                         data-preset="{{ draft.preset_id or '' }}"
                                         data-has-image="{{ '1' if draft.wants_image else '' }}"
@@ -338,7 +378,19 @@
                                 <input id="ai-window-end" type="time" name="ai_window_end" value="{{ ai.prefs.ai_window_end }}" required>
                             </div>
                         </div>
-                        <p class="hint">Times use the timezone in Settings ({{ settings.timezone }}). The AI chooses times from what it knows about your audience, not from your account's engagement numbers.</p>
+                        {% if ai.communities %}
+                        <label for="ai-destination">Autopilot posts to</label>
+                        <select id="ai-destination" name="ai_destination">
+                            <option value="">My profile</option>
+                            {% for community in ai.communities %}<option value="{{ community.id }}" {% if community.id == ai.prefs.ai_destination %}selected{% endif %}>Community: {{ community.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
+                        <label class="toggle">
+                            <input type="checkbox" name="ai_learn_timing" value="1" {% if ai.prefs.ai_learn_timing == '1' %}checked{% endif %}>
+                            <span>Learn from my posts' engagement</span>
+                        </label>
+                        <p class="hint">Once a day, reads your recent posts and their likes, reposts and replies from X (one paid read), then favours the hours and styles that did best.</p>
+                        <p class="hint">Times use the timezone in Settings ({{ settings.timezone }}). Without engagement learning, the AI chooses times from what it knows about your audience in general.</p>
                         <label class="toggle">
                             <input type="checkbox" name="ai_require_approval" value="1" {% if ai.review %}checked{% endif %}>
                             <span>Review autopilot posts before they go out</span>
@@ -392,6 +444,17 @@
                         </div>
                         <label for="ai-image-style">Style applied to every image</label>
                         <textarea id="ai-image-style" name="ai_image_style" rows="2" maxlength="2000">{{ ai.prefs.ai_image_style }}</textarea>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-cost-text">Cost per text request (USD)</label>
+                                <input id="ai-cost-text" type="number" name="ai_cost_text" min="0" max="100" step="0.0001" value="{{ ai.prefs.ai_cost_text }}" required>
+                            </div>
+                            <div>
+                                <label for="ai-cost-image">Cost per image (USD)</label>
+                                <input id="ai-cost-image" type="number" name="ai_cost_image" min="0" max="100" step="0.0001" value="{{ ai.prefs.ai_cost_image }}" required>
+                            </div>
+                        </div>
+                        <p class="hint">The two costs are your own estimates, used only for the spend shown at the top. Check your provider's price list.</p>
                         <p class="hint">Leave a model empty to use the default. If the key is missing for the provider you pick, the other one is used.</p>
                     </div>
                 </div>
@@ -400,6 +463,30 @@
                     <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save AI preferences</button>
                 </div>
             </form>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-chart-line"></i> What works for you</h2>
+                    <form action="{{ url_for('engage_insights') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary btn-small" title="One paid read from X"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                    </form>
+                </div>
+                {% if engage.prefs.ai_insights_error %}<p class="error-text">{{ engage.prefs.ai_insights_error }}</p>{% endif %}
+                {% if ai.insights and ai.insights.posts %}
+                <dl class="breakdown">
+                    <div><dt>Posts read</dt><dd>{{ ai.insights.posts }}</dd></div>
+                    <div><dt>Best hours</dt><dd>{% if ai.insights.best_hours %}{% for hour in ai.insights.best_hours %}{{ '%02d:00'|format(hour) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}<span class="muted">Not clear yet</span>{% endif %}</dd></div>
+                    <div><dt>Updated</dt><dd>{% if ai.insights.updated_at %}<span class="ts" data-iso="{{ ai.insights.updated_at.isoformat() }}"></span>{% endif %}</dd></div>
+                </dl>
+                {% if ai.insights.posts < 10 %}<p class="hint">Fewer than 10 posts so far, so this is not used yet.</p>{% endif %}
+                {% if ai.insights.top %}
+                <p class="hint">Posts that did best:</p>
+                <ul class="top-posts">{% for text in ai.insights.top %}<li>{{ text }}</li>{% endfor %}</ul>
+                {% endif %}
+                {% else %}
+                <p class="hint">Nothing read yet. Turn on "Learn from my posts' engagement" above, or press Refresh.</p>
+                {% endif %}
+            </div>
 
             <div class="card">
                 <h2><i class="fa-solid fa-list-check"></i> Setup checklist</h2>
@@ -422,7 +509,7 @@
                         <dd>{% if ai.x_media_upload == 'ok' %}Working{% elif ai.x_media_upload == 'failed' %}<span class="error-text">Refused. Run authorize.py again</span>{% else %}<span class="muted">Not tried yet</span>{% endif %}</dd>
                     </div>
                 </dl>
-                <p class="hint">Posting images needs the <code>media.write</code> permission. If you connected X before this feature existed, run <code>authorize.py</code> once more.</p>
+                <p class="hint">Posting images needs the <code>media.write</code> permission, and liking mentions needs <code>like.write</code>. If you connected X before these features existed, run <code>authorize.py</code> once more.</p>
             </div>
         </div>
     </div>

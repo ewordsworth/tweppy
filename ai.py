@@ -271,6 +271,29 @@ def shrink(raw, mime):
         return raw, mime
 
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_MAGIC = {b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg", b"GIF8": "image/gif", b"RIFF": "image/webp"}
+
+
+def prepare_upload(raw):
+    """Check that uploaded bytes are an image X accepts. Returns (bytes, mime)."""
+    if not raw:
+        raise AIError("Choose an image file first.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise AIError("That image is larger than 10 MB.")
+    mime = next((m for magic, m in _MAGIC.items() if raw.startswith(magic)), None)
+    if mime is None or (mime == "image/webp" and raw[8:12] != b"WEBP"):
+        raise AIError("Only JPEG, PNG, WebP and GIF images can be attached.")
+    if mime == "image/gif":
+        if len(raw) > 5 * 1024 * 1024:
+            raise AIError("GIFs must be 5 MB or smaller.")
+        return raw, mime           # re-encoding would drop the animation
+    raw, mime = shrink(raw, mime)
+    if len(raw) > 5 * 1024 * 1024:
+        raise AIError("That image is over X's 5 MB limit and could not be made smaller.")
+    return raw, mime
+
+
 # ---------------------------------------------------------------------------
 # Connection check
 # ---------------------------------------------------------------------------

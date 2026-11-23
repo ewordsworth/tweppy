@@ -128,6 +128,23 @@ SCHEMA = [
         auto_approve INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
     )""",
+    # ---- Replies ----
+    # One row per mention of the account. id is the mention's post ID on X.
+    """CREATE TABLE IF NOT EXISTS mentions (
+        id TEXT PRIMARY KEY,
+        author_id TEXT NOT NULL DEFAULT '',
+        author_username TEXT NOT NULL DEFAULT '',
+        author_name TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        posted_at TEXT,
+        status TEXT NOT NULL DEFAULT 'new',
+        reply_text TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        liked INTEGER NOT NULL DEFAULT 0,
+        fetched_at TEXT NOT NULL,
+        handled_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_mentions_status ON mentions (status, fetched_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_posted_at ON post_history (posted_at)",
     "CREATE INDEX IF NOT EXISTS idx_failures_failed_at ON post_failures (failed_at)",
     "CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_posts (posted, scheduled_at)",
@@ -138,6 +155,9 @@ MIGRATIONS = [
     ("tweet_queue", "media_id", "INTEGER"),
     ("scheduled_posts", "media_id", "INTEGER"),
     ("post_history", "has_media", "INTEGER NOT NULL DEFAULT 0"),
+    ("community_tweet_queue", "media_id", "INTEGER"),
+    ("scheduled_posts", "community_id", "TEXT"),
+    ("ai_drafts", "community_id", "TEXT"),
 ]
 
 MEDIA_CHUNK_CHARS = 400_000

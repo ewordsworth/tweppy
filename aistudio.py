@@ -27,6 +27,7 @@ from flask import Response, flash, jsonify, redirect, request, url_for
 
 import ai
 import db
+import engage
 
 core = None     # the webapp module, set by register()
 
@@ -84,6 +85,10 @@ AI_DEFAULTS = {
     "ai_window_end": "21:00",
     "ai_require_approval": "1",
     "ai_autopilot_enabled": "0",
+    "ai_destination": "",        # "" = profile, else a saved community id (autopilot)
+    "ai_learn_timing": "0",      # use the account's own engagement to pick times
+    "ai_cost_text": "0.002",     # the user's own estimate per text request, USD
+    "ai_cost_image": "0.04",     # and per image
     # State
     "ai_planned_for": "",
     "ai_last_error": "",
@@ -275,9 +280,10 @@ def build_system_prompt():
     return "\n".join(lines)
 
 
-def build_user_prompt(formats, brief, presets, forced_preset, recent, timing):
+def build_user_prompt(formats, brief, presets, forced_preset, recent, timing, notes=()):
     count = len(formats)
     lines = [f"Write {count} post{'s' if count != 1 else ''}."]
+    lines += list(notes)
     if brief:
         lines.append(f"What the owner wants this time: {brief}")
     else:
@@ -356,7 +362,7 @@ def recent_texts():
 # ---------------------------------------------------------------------------
 
 def compose(count, brief="", format_mode=None, preset_id=None, origin="manual",
-            auto_approve=False, with_times=True, target=None):
+            auto_approve=False, with_times=True, target=None, community_id=None):
     """Write `count` posts and store them as drafts. Returns how many were stored.
 
     Raises ai.AIError when the text model fails or returns nothing usable.
@@ -378,12 +384,20 @@ def compose(count, brief="", format_mode=None, preset_id=None, origin="manual",
         quiet = (pref("quiet_start"), pref("quiet_end")) if core.setting_bool("quiet_hours_enabled") else None
         timing = (day, earliest, end, quiet)
 
+    notes = []
+    community = core.get_community(community_id) if community_id else None
+    community_id = community["id"] if community else None
+    if community:
+        notes.append(f"These posts go into the X Community \"{community['name']}\", so write for its members.")
+    if core.setting_bool("ai_learn_timing"):
+        notes += engage.insight_notes(include_hours=timing is not None)
+
     recent = recent_texts()
     provider = ai.resolve_provider(pref("ai_text_provider"))
     result = ai.generate_json(
         provider, pref("ai_text_model"),
         build_system_prompt(),
-        build_user_prompt(formats, brief, presets, forced, recent[:40], timing),
+        build_user_prompt(formats, brief, presets, forced, recent[:40], timing, notes),
     )
     _bump("ai_text_calls")
 
@@ -429,10 +443,11 @@ def compose(count, brief="", format_mode=None, preset_id=None, origin="manual",
         when = post.get("when")
         db.execute(
             "INSERT INTO ai_drafts (text, wants_image, image_prompt, preset_id, image_status, suggested_at, "
-            "reason, origin, auto_approve, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "reason, origin, auto_approve, created_at, community_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (post["text"], 1 if post["wants_image"] else 0, post["image_prompt"] if post["wants_image"] else "",
              post["preset_id"], "pending" if post["wants_image"] else "none",
-             db.to_db_str(when) if when else None, post["reason"], origin, 1 if auto_approve else 0, now),
+             db.to_db_str(when) if when else None, post["reason"], origin, 1 if auto_approve else 0, now,
+             community_id),
         )
     return len(posts)
 
@@ -476,7 +491,17 @@ def approve_draft(draft, how):
     media_id = draft["media_id"] if draft["image_status"] == "ready" else None
     now = core.utcnow()
 
-    if how == "now":
+    community_id = draft.get("community_id")
+    if community_id and not core.get_community(community_id):
+        return False, "The community this draft was written for has been removed. Discard it or write a new one."
+
+    if how == "now" and community_id:
+        ok, message, _ = core.publish_community_item(
+            {"id": None, "text": draft["text"], "community_id": community_id, "media_id": media_id})
+        if not ok:
+            return False, message
+        message = "Posted to the community."
+    elif how == "now":
         ok, message = core.post_tweet(draft["text"], media_id)
         if not ok:
             core.record_failure(draft["text"], message, "profile")
@@ -488,11 +513,16 @@ def approve_draft(draft, how):
         if when is None or when < now + timedelta(minutes=1):
             when = now + timedelta(minutes=2)
         db.execute(
-            "INSERT INTO scheduled_posts (text, scheduled_at, created_at, media_id) VALUES (?, ?, ?, ?)",
-            (draft["text"], db.to_db_str(when), db.utcnow_str(), media_id),
+            "INSERT INTO scheduled_posts (text, scheduled_at, created_at, media_id, community_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (draft["text"], db.to_db_str(when), db.utcnow_str(), media_id, community_id),
         )
         core.start_scheduler_if_needed()
         message = "Scheduled."
+    elif community_id:
+        db.execute("INSERT INTO community_tweet_queue (text, community_id, created_at, media_id) VALUES (?, ?, ?, ?)",
+                   (draft["text"], community_id, db.utcnow_str(), media_id))
+        message = "Added to the community queue."
     else:
         db.execute("INSERT INTO tweet_queue (text, created_at, media_id) VALUES (?, ?, ?)",
                    (draft["text"], db.utcnow_str(), media_id))
@@ -517,6 +547,7 @@ def sweep_orphan_media():
         "SELECT id FROM media WHERE created_at < ? "
         "AND id NOT IN (SELECT media_id FROM tweet_queue WHERE media_id IS NOT NULL) "
         "AND id NOT IN (SELECT media_id FROM scheduled_posts WHERE media_id IS NOT NULL) "
+        "AND id NOT IN (SELECT media_id FROM community_tweet_queue WHERE media_id IS NOT NULL) "
         "AND id NOT IN (SELECT media_id FROM ai_drafts WHERE media_id IS NOT NULL)"
     )
     ids = [row["id"] for row in db.query(orphans, (cutoff,))]
@@ -561,7 +592,7 @@ def run_plan(force=False):
         return 0
     count = max(1, round(pref_int("ai_posts_per_day", 1, MAX_POSTS_PER_DAY) * fraction))
     made = compose(count, origin="autopilot", auto_approve=not core.setting_bool("ai_require_approval"),
-                   target=target)
+                   target=target, community_id=pref("ai_destination") or None)
     db.set_setting("ai_planned_for", day.isoformat())
     return made
 
@@ -572,7 +603,8 @@ def _run_job(job):
             run_plan(force=True)
         else:
             compose(job["count"], brief=job.get("brief", ""), format_mode=job.get("format_mode"),
-                    preset_id=job.get("preset_id"), with_times=job.get("with_times", True))
+                    preset_id=job.get("preset_id"), with_times=job.get("with_times", True),
+                    community_id=job.get("community_id"))
         _note_success()
     except ai.AIError as e:
         _note_error(str(e))
@@ -614,6 +646,11 @@ def _tick():
         "SELECT * FROM ai_drafts WHERE auto_approve = 1 AND image_status IN ('none', 'ready') ORDER BY id ASC")
     for draft in ready:
         approve_draft(draft, default_destination(draft))
+
+    try:
+        engage.tick(_state)
+    except Exception as e:
+        print(f"[engage] Error: {e}")
 
     if not _state["last_sweep"] or now - _state["last_sweep"] > MEDIA_SWEEP_EVERY:
         _state["last_sweep"] = now
@@ -667,7 +704,11 @@ def page_context():
     drafts = db.query("SELECT * FROM ai_drafts ORDER BY COALESCE(suggested_at, '9999') ASC, id ASC")
     presets = get_presets()
     preset_names = {p["id"]: p["name"] for p in presets}
+    communities = db.query("SELECT id, name FROM communities ORDER BY created_at ASC, id ASC")
+    community_names = {c["id"]: c["name"] for c in communities}
+    text_calls, image_calls = _counter("ai_text_calls"), _counter("ai_image_calls")
     for draft in drafts:
+        draft["community_name"] = community_names.get(draft.get("community_id"))
         draft["suggested_at"] = db.parse_utc(draft["suggested_at"]) if draft["suggested_at"] else None
         draft["preset_name"] = preset_names.get(draft["preset_id"])
         draft["length"] = x_length(draft["text"])
@@ -716,8 +757,12 @@ def page_context():
         "planned_for": prefs["ai_planned_for"],
         "next_plan_day": day.isoformat(),
         "next_plan_count": max(1, round(per_day * fraction)),
-        "text_calls": _counter("ai_text_calls"),
-        "image_calls": _counter("ai_image_calls"),
+        "text_calls": text_calls,
+        "image_calls": image_calls,
+        "text_spend": text_calls * core.setting_float("ai_cost_text"),
+        "image_spend": image_calls * core.setting_float("ai_cost_image"),
+        "communities": communities,
+        "insights": engage.insights(),
         "x_media_upload": prefs["x_media_upload"],
         "max_compose": MAX_COMPOSE,
         "max_per_day": MAX_POSTS_PER_DAY,
@@ -810,6 +855,17 @@ def register(app, core_module):
             except ValueError:
                 problems.append("posting window")
         db.set_setting("ai_require_approval", "1" if form.get("ai_require_approval") == "1" else "0")
+        db.set_setting("ai_learn_timing", "1" if form.get("ai_learn_timing") == "1" else "0")
+        destination = form.get("ai_destination", "")
+        db.set_setting("ai_destination", destination if core.get_community(destination) else "")
+        for key in ("ai_cost_text", "ai_cost_image"):
+            try:
+                value = float(form.get(key, ""))
+                if not 0 <= value <= 100:
+                    raise ValueError
+                db.set_setting(key, f"{value:g}")
+            except ValueError:
+                problems.append("cost estimate")
 
         if problems:
             flash(f'Saved, except these invalid values: {", ".join(sorted(set(problems)))}.', "error")
@@ -863,6 +919,7 @@ def register(app, core_module):
             "format_mode": format_mode if format_mode in FORMAT_MODES else None,
             "preset_id": core.parse_int_id(request.form.get("preset_id")),
             "with_times": request.form.get("with_times") == "1",
+            "community_id": request.form.get("community_id") or None,
         })
         flash(f"Writing {count} post{'s' if count != 1 else ''}. Drafts will appear here shortly.", "info")
         return _back()
@@ -964,6 +1021,67 @@ def register(app, core_module):
                    "image_prompt = ?, preset_id = ? WHERE id = ?", (prompt, preset_id, draft_id))
         _wake.set()
         flash("Making the image. It will appear on the draft shortly.", "info")
+        return _back()
+
+    def _uploaded_image():
+        """The image from the request's "image" file field as (bytes, mime), or None."""
+        upload = request.files.get("image")
+        if not upload or not upload.filename:
+            return None
+        return ai.prepare_upload(upload.read(ai.MAX_UPLOAD_BYTES + 1))
+
+    @app.route("/ai/drafts/new", methods=["POST"])
+    @admin
+    def ai_draft_new():
+        """A draft the user wrote themselves, optionally with their own image."""
+        text = request.form.get("text", "").strip()
+        if not text:
+            flash("Write the post text first.", "error")
+            return _back()
+        if x_length(text) > core.TWEET_MAX_CHARS:
+            flash("That post is over 280 characters.", "error")
+            return _back()
+        try:
+            image = _uploaded_image()
+            when = core.parse_schedule_datetime(request.form.get("suggested_at", "").strip(),
+                                                request.form.get("suggested_at_utc", "").strip())
+        except ai.AIError as e:
+            flash(str(e), "error")
+            return _back()
+        except ValueError:
+            flash("Invalid date/time.", "error")
+            return _back()
+        community = core.get_community(request.form.get("community_id"))
+        media_id = db.save_media(image[0], image[1], "uploaded") if image else None
+        db.execute(
+            "INSERT INTO ai_drafts (text, wants_image, media_id, image_status, suggested_at, origin, created_at, "
+            "community_id) VALUES (?, ?, ?, ?, ?, 'own', ?, ?)",
+            (text, 1 if image else 0, media_id, "ready" if image else "none",
+             db.to_db_str(when) if when else None, db.utcnow_str(), community["id"] if community else None),
+        )
+        flash("Draft added.", "success")
+        return _back()
+
+    @app.route("/ai/drafts/<int:draft_id>/upload", methods=["POST"])
+    @admin
+    def ai_draft_upload(draft_id):
+        """Attach the user's own image to a draft, replacing any image it has."""
+        draft = _draft_or_flash(draft_id)
+        if not draft:
+            return _back()
+        try:
+            image = _uploaded_image()
+        except ai.AIError as e:
+            flash(str(e), "error")
+            return _back()
+        if not image:
+            flash("Choose an image file first.", "error")
+            return _back()
+        media_id = db.save_media(image[0], image[1], "uploaded")
+        db.execute("UPDATE ai_drafts SET wants_image = 1, image_status = 'ready', image_error = '', media_id = ? "
+                   "WHERE id = ?", (media_id, draft_id))
+        core.discard_media(draft.get("media_id"))
+        flash("Your image is attached to the draft.", "success")
         return _back()
 
     @app.route("/ai/drafts/<int:draft_id>/delete", methods=["POST"])

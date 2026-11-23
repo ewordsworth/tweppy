@@ -559,6 +559,7 @@
             const image = e.target.closest('.js-draft-image');
             if (image) {
                 $('#draft-image-form').action = image.getAttribute('data-action');
+                $('#draft-upload-form').action = image.getAttribute('data-upload');
                 $('#draft-image-prompt').value = image.getAttribute('data-prompt');
                 $('#draft-image-preset').value = image.getAttribute('data-preset');
                 $('#draft-image-remove').hidden = !image.getAttribute('data-has-image');
