@@ -53,3 +53,55 @@
     </form>
   </div>
 </div>
+
+<!-- Edit AI Draft Modal -->
+<div id="edit-draft-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-draft-title">
+  <div class="modal-content">
+    <button type="button" class="close-button js-close-modal" aria-label="Close">&times;</button>
+    <h2 id="edit-draft-title">Edit Draft</h2>
+    <form id="edit-draft-form" method="POST" class="stacked-form js-utc-form">
+      <label for="edit-draft-text">Post</label>
+      <textarea id="edit-draft-text" name="text" rows="5" required data-preview="edit-draft-preview" data-single="1"></textarea>
+      <div id="edit-draft-preview" class="tweet-preview"></div>
+      <label for="edit-draft-datetime">Post at <span class="muted">(leave empty to send it to the queue)</span></label>
+      <input id="edit-draft-datetime" name="suggested_at" type="datetime-local" data-utc-target="edit-draft-datetime-utc" />
+      <input type="hidden" id="edit-draft-datetime-utc" name="suggested_at_utc" />
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary js-close-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- AI Draft Image Modal -->
+<div id="draft-image-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="draft-image-title">
+  <div class="modal-content">
+    <button type="button" class="close-button js-close-modal" aria-label="Close">&times;</button>
+    <h2 id="draft-image-title">Image for this draft</h2>
+    <form id="draft-image-form" method="POST" class="stacked-form">
+      <label for="draft-image-prompt">What should the picture show?</label>
+      <textarea id="draft-image-prompt" name="image_prompt" rows="4" maxlength="1000" placeholder="Leave empty to base it on the post text."></textarea>
+      <label for="draft-image-preset">Preset</label>
+      <select id="draft-image-preset" name="preset_id">
+        <option value="">None</option>
+        {% for preset in ai.presets %}
+        <option value="{{ preset.id }}">{{ preset.name }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint">Making an image is a paid request to your image model.</p>
+      <div class="form-actions">
+        <button type="submit" name="action" value="remove" class="btn btn-ghost-danger" id="draft-image-remove" formnovalidate>Remove image</button>
+        <button type="button" class="btn btn-secondary js-close-modal">Cancel</button>
+        <button type="submit" name="action" value="make" class="btn btn-primary">Make image</button>
+      </div>
+    </form>
+    <form id="draft-upload-form" method="POST" enctype="multipart/form-data" class="stacked-form upload-form">
+      <label for="draft-upload-file">Or use your own image <span class="muted">(JPEG, PNG, WebP or GIF)</span></label>
+      <input id="draft-upload-file" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-secondary">Upload and attach</button>
+      </div>
+    </form>
+  </div>
+</div>

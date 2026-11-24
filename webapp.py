@@ -11,6 +11,7 @@ import csv
 import io
 import os
 import re
+import sys
 import threading
 from datetime import datetime, timezone, timedelta, time as dtime
 from functools import wraps
@@ -21,7 +22,9 @@ from dotenv import load_dotenv
 from flask import (Flask, Response, render_template, request, redirect, url_for, flash,
                    jsonify, session, make_response)
 
+import aistudio
 import db
+import engage
 import rest
 from rest import get_valid_token
 
@@ -30,6 +33,7 @@ load_dotenv()
 app = Flask(__name__)
 # A fixed SECRET_KEY keeps sessions (e.g. the active community) alive across restarts.
 app.secret_key = os.getenv("SECRET_KEY") or os.urandom(24)
+app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024    # uploaded images
 
 # Minimal shared-secret protection
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
@@ -44,6 +48,7 @@ def _inject_source_url():
     return {"source_url": SOURCE_URL}
 
 X_TWEETS_URL = "https://api.x.com/2/tweets"
+X_MEDIA_UPLOAD_URL = "https://api.x.com/2/media/upload"
 TWEET_MAX_CHARS = 280
 URL_RE = re.compile(r"https?://\S+|\bwww\.\S+", re.IGNORECASE)
 
@@ -231,11 +236,11 @@ def has_link(text):
 # History, stats, failures
 # ---------------------------------------------------------------------------
 
-def record_post(text, post_type="profile", count_in_stats=True):
+def record_post(text, post_type="profile", count_in_stats=True, has_media=False):
     """Add a post to history and, for profile posts, bump the posted counter."""
     db.execute(
-        "INSERT INTO post_history (text, posted_at, type) VALUES (?, ?, ?)",
-        (text, db.utcnow_str(), post_type),
+        "INSERT INTO post_history (text, posted_at, type, has_media) VALUES (?, ?, ?, ?)",
+        (text, db.utcnow_str(), post_type, 1 if has_media else 0),
     )
     if count_in_stats:
         db.execute(
@@ -327,14 +332,25 @@ def add_tweets_to_queue(tweets):
 def get_next_tweet():
     """Next unposted tweet: random or oldest-first, per Settings."""
     order = "RANDOM()" if setting("queue_order") == "random" else "created_at ASC, id ASC"
-    return db.query_one(f"SELECT id, text FROM tweet_queue WHERE posted = 0 ORDER BY {order} LIMIT 1")
+    return db.query_one(f"SELECT id, text, media_id FROM tweet_queue WHERE posted = 0 ORDER BY {order} LIMIT 1")
 
 
-def mark_tweet_posted(tweet_id, tweet_text):
+def mark_tweet_posted(tweet_id, tweet_text, media_id=None):
     """Move a tweet from the queue to history. tweet_id may be None for ad-hoc posts."""
-    record_post(tweet_text, "profile")
+    record_post(tweet_text, "profile", has_media=media_id is not None)
     if tweet_id is not None:
         db.execute("DELETE FROM tweet_queue WHERE id = ?", (tweet_id,))
+    discard_media(media_id)
+
+
+def discard_media(media_id):
+    """Drop a stored image once its post is out. Never fails the caller."""
+    if media_id is None:
+        return
+    try:
+        db.delete_media(media_id)
+    except Exception as e:
+        print(f"[media] Could not delete image {media_id}: {e}")
 
 
 def schedule_rows(items):
@@ -366,15 +382,18 @@ def add_tweets_to_community_queue(tweets, community_id):
 def get_next_community_tweet(community_id):
     """Get the oldest unposted tweet for a specific community."""
     return db.query_one(
-        "SELECT id, text, community_id FROM community_tweet_queue "
+        "SELECT id, text, community_id, media_id FROM community_tweet_queue "
         "WHERE community_id = ? AND posted = 0 ORDER BY created_at ASC, id ASC LIMIT 1",
         (community_id,),
     )
 
 
-def mark_community_tweet_posted(tweet_id, tweet_text):
-    record_post(tweet_text, "community", count_in_stats=False)
-    db.execute("DELETE FROM community_tweet_queue WHERE id = ?", (tweet_id,))
+def mark_community_tweet_posted(tweet_id, tweet_text, media_id=None):
+    """Record a community post. tweet_id may be None for posts that never sat in the queue."""
+    record_post(tweet_text, "community", count_in_stats=False, has_media=media_id is not None)
+    if tweet_id is not None:
+        db.execute("DELETE FROM community_tweet_queue WHERE id = ?", (tweet_id,))
+    discard_media(media_id)
 
 
 # ---------------------------------------------------------------------------
@@ -428,20 +447,71 @@ def _create_post(payload):
     return False, explain_x_error(response), None
 
 
-def post_to_profile(caption):
-    ok, message, _ = _create_post({"text": caption})
+def upload_media_to_x(media_id):
+    """Upload a stored image to X. Returns (ok, message, x_media_id)."""
+    stored = db.load_media(media_id)
+    if not stored:
+        return False, "The image for this post is missing. Regenerate it or remove it.", None
+    raw, mime = stored
+    try:
+        token = get_valid_token()
+        if not token:
+            return False, "No X access token found. Run authorize.py to authorize the app.", None
+        extension = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(mime, "png")
+        response = requests.post(
+            X_MEDIA_UPLOAD_URL,
+            headers={"Authorization": f"Bearer {token}"},
+            files={"media": (f"image.{extension}", raw, mime)},
+            data={"media_category": "tweet_image", "media_type": mime},
+            timeout=90,
+        )
+    except Exception as e:
+        return False, f"Could not reach X to upload the image: {e}", None
+    if response.status_code in (200, 201):
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        data = body.get("data") or body
+        x_media_id = data.get("id") or data.get("media_id_string") or data.get("media_id")
+        if x_media_id:
+            if db.get_setting("x_media_upload") != "ok":
+                db.set_setting("x_media_upload", "ok")
+            return True, "Uploaded", str(x_media_id)
+        return False, "X accepted the image but returned no media ID.", None
+    if response.status_code == 403:
+        db.set_setting("x_media_upload", "failed")
+        return False, ("X refused the image upload. Run authorize.py again so the token gets the "
+                       "media.write permission. " + explain_x_error(response)), None
+    return False, "Image upload failed. " + explain_x_error(response), None
+
+
+def post_to_profile(caption, media_id=None):
+    payload = {"text": caption}
+    if media_id is not None:
+        ok, message, x_media_id = upload_media_to_x(media_id)
+        if not ok:
+            return False, message
+        payload["media"] = {"media_ids": [x_media_id]}
+    ok, message, _ = _create_post(payload)
     return ok, message
 
 
-def post_to_community(caption, community_id):
+def post_to_community(caption, community_id, media_id=None):
     if not community_id:
         return False, "A community ID is required for community posting.", None
-    return _create_post({"text": caption, "community_id": str(community_id)})
+    payload = {"text": caption, "community_id": str(community_id)}
+    if media_id is not None:
+        ok, message, x_media_id = upload_media_to_x(media_id)
+        if not ok:
+            return False, message, None
+        payload["media"] = {"media_ids": [x_media_id]}
+    return _create_post(payload)
 
 
-def post_tweet(caption):
+def post_tweet(caption, media_id=None):
     """Backward-compatible alias for posting to profile."""
-    return post_to_profile(caption)
+    return post_to_profile(caption, media_id)
 
 
 def retweet(tweet_id):
@@ -473,9 +543,9 @@ def retweet(tweet_id):
 
 def publish_profile_item(item):
     """Post a queued profile tweet; record success or failure. Returns (ok, message)."""
-    ok, message = post_tweet(item["text"])
+    ok, message = post_tweet(item["text"], item.get("media_id"))
     if ok:
-        mark_tweet_posted(item["id"], item["text"])
+        mark_tweet_posted(item["id"], item["text"], item.get("media_id"))
     else:
         record_failure(item["text"], message, "profile")
     return ok, message
@@ -486,11 +556,11 @@ def publish_community_item(item):
 
     Returns (ok, message, retweet_note). retweet_note is None when no retweet was attempted.
     """
-    ok, message, new_tweet_id = post_to_community(item["text"], item["community_id"])
+    ok, message, new_tweet_id = post_to_community(item["text"], item["community_id"], item.get("media_id"))
     if not (ok and new_tweet_id):
         record_failure(item["text"], message, "community")
         return False, message, None
-    mark_community_tweet_posted(item["id"], item["text"])
+    mark_community_tweet_posted(item["id"], item["text"], item.get("media_id"))
     if not setting_bool("retweet_community_posts"):
         return True, message, None
     rt_ok, rt_message = retweet(new_tweet_id)
@@ -633,7 +703,7 @@ def scheduler_worker(stop):
         try:
             now = utcnow()
             due = db.query(
-                "SELECT id, text FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
+                "SELECT id, text, media_id, community_id FROM scheduled_posts WHERE posted = 0 AND scheduled_at <= ? "
                 "ORDER BY scheduled_at ASC, id ASC",
                 (db.to_db_str(now),),
             )
@@ -641,16 +711,25 @@ def scheduler_worker(stop):
                 failures, retry_at = _scheduler_retry.get(doc["id"], (0, None))
                 if retry_at and retry_at > now:
                     continue
-                success, message = post_tweet(doc["text"])
+                if doc.get("community_id"):
+                    # Records its own history and failures.
+                    success, message, _ = publish_community_item(
+                        {"id": None, "text": doc["text"], "community_id": doc["community_id"],
+                         "media_id": doc.get("media_id")})
+                else:
+                    success, message = post_tweet(doc["text"], doc.get("media_id"))
+                    if success:
+                        record_post(doc["text"], "profile", has_media=doc.get("media_id") is not None)
+                        discard_media(doc.get("media_id"))
                 if success:
-                    db.execute("UPDATE scheduled_posts SET posted = 1 WHERE id = ?", (doc["id"],))
-                    record_post(doc["text"], "profile")
+                    db.execute("UPDATE scheduled_posts SET posted = 1, media_id = NULL WHERE id = ?", (doc["id"],))
                     _scheduler_retry.pop(doc["id"], None)
                     print(f"[scheduler] Posted scheduled tweet: {doc['text']}")
                 else:
                     failures += 1
                     _scheduler_retry[doc["id"]] = (failures, utcnow() + _backoff(failures))
-                    record_failure(doc["text"], message, "scheduled")
+                    if not doc.get("community_id"):
+                        record_failure(doc["text"], message, "scheduled")
                     print(f"[scheduler] Failed scheduled post: {message}")
         except Exception as e:
             print(f"[scheduler] Error: {e}")
@@ -679,6 +758,7 @@ def resume_workers():
             return
         _resumed = True
     start_scheduler_if_needed()
+    aistudio.start_service()
     try:
         if setting_bool("auto_post_enabled"):
             start_worker("profile")
@@ -796,7 +876,7 @@ def build_analytics(queue_count):
 def build_calendar_items():
     since = db.to_db_str(utcnow() - timedelta(days=90))
     rows = db.query(
-        "SELECT id, text, scheduled_at, posted FROM scheduled_posts "
+        "SELECT id, text, scheduled_at, posted, media_id FROM scheduled_posts "
         "WHERE posted = 0 OR scheduled_at >= ? ORDER BY scheduled_at ASC, id ASC",
         (since,),
     )
@@ -805,6 +885,7 @@ def build_calendar_items():
         "text": row["text"],
         "at": iso(db.parse_utc(row["scheduled_at"])),
         "posted": bool(row["posted"]),
+        "image": row.get("media_id") is not None,
     } for row in rows]
 
 
@@ -816,13 +897,13 @@ def build_calendar_items():
 @require_admin
 def index():
     queue = db.query(
-        "SELECT id, text, created_at FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC"
+        "SELECT id, text, created_at, media_id FROM tweet_queue WHERE posted = 0 ORDER BY created_at ASC, id ASC"
     )
     history = _rows_with_times(db.query(
-        "SELECT id, text, posted_at, type FROM post_history ORDER BY posted_at DESC, id DESC LIMIT 50"
+        "SELECT id, text, posted_at, type, has_media FROM post_history ORDER BY posted_at DESC, id DESC LIMIT 50"
     ), "posted_at")
     scheduled = _rows_with_times(db.query(
-        "SELECT id, text, scheduled_at FROM scheduled_posts WHERE posted = 0 ORDER BY scheduled_at ASC, id ASC"
+        "SELECT id, text, scheduled_at, media_id FROM scheduled_posts WHERE posted = 0 ORDER BY scheduled_at ASC, id ASC"
     ), "scheduled_at")
     communities = db.query(
         "SELECT c.id, c.name, "
@@ -837,7 +918,7 @@ def index():
     community_queue = []
     if active_community:
         community_queue = db.query(
-            "SELECT id, text, created_at FROM community_tweet_queue "
+            "SELECT id, text, created_at, media_id FROM community_tweet_queue "
             "WHERE community_id = ? AND posted = 0 ORDER BY created_at ASC, id ASC",
             (active_community["id"],),
         )
@@ -859,6 +940,7 @@ def index():
         "tweetMax": TWEET_MAX_CHARS,
         "costPerPost": setting_float("cost_per_post"),
         "costPerLinkPost": setting_float("cost_per_link_post"),
+        "ai": aistudio.status(),
     }
 
     resp = make_response(render_template(
@@ -889,6 +971,8 @@ def index():
         token_updated_at=tokens["updated_at"] if tokens else None,
         admin_protected=bool(ADMIN_TOKEN),
         page_data=page_data,
+        ai=aistudio.page_context(),
+        engage=engage.page_context(),
     ))
 
     # Persist admin token in a cookie if provided in the query string
@@ -972,7 +1056,7 @@ def post_next():
 @require_admin
 def post_specific_tweet(tweet_id):
     tid = parse_int_id(tweet_id)
-    tweet = db.query_one("SELECT id, text FROM tweet_queue WHERE id = ?", (tid,)) if tid is not None else None
+    tweet = db.query_one("SELECT id, text, media_id FROM tweet_queue WHERE id = ?", (tid,)) if tid is not None else None
     if not tweet:
         flash('Tweet not found in queue.', 'error')
         return redirect(url_for('index'))
@@ -1391,7 +1475,7 @@ def post_specific_community_tweet(tweet_id):
     tweet = None
     if tid is not None:
         tweet = db.query_one(
-            "SELECT id, text, community_id FROM community_tweet_queue WHERE id = ?", (tid,)
+            "SELECT id, text, community_id, media_id FROM community_tweet_queue WHERE id = ?", (tid,)
         )
     if not tweet:
         flash('Community tweet not found in queue.', 'error')
@@ -1483,6 +1567,13 @@ def pause_community_auto_post():
 def stop_community_auto_posting():
     """Alias for pausing community auto-posting to match the frontend route."""
     return pause_community_auto_post()
+
+
+# AI Studio (composer, image presets, autopilot) lives in aistudio.py. It is
+# handed this module rather than importing it, so running webapp.py directly
+# does not load the app twice.
+aistudio.register(app, sys.modules[__name__])
+engage.register(app, sys.modules[__name__])
 
 
 if __name__ == "__main__":

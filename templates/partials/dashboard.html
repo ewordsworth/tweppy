@@ -121,6 +121,7 @@
                         <div class="tweet-queue-container">
                             {% for tweet in queue %}
                             <div class="tweet-item">
+                                {% if tweet.media_id %}<a class="thumb" href="{{ url_for('ai_media', media_id=tweet.media_id) }}" target="_blank" rel="noopener"><img src="{{ url_for('ai_media', media_id=tweet.media_id) }}" alt="Image attached to this post" loading="lazy"></a>{% endif %}
                                 <div class="tweet-body">
                                     <p>{{ tweet.text }}</p>
                                     <span class="tweet-meta js-char-count"></span>
@@ -156,6 +157,7 @@
                         <div class="tweet-queue-container">
                             {% for item in scheduled %}
                             <div class="tweet-item">
+                                {% if item.media_id %}<a class="thumb" href="{{ url_for('ai_media', media_id=item.media_id) }}" target="_blank" rel="noopener"><img src="{{ url_for('ai_media', media_id=item.media_id) }}" alt="Image attached to this post" loading="lazy"></a>{% endif %}
                                 <div class="tweet-body">
                                     <span class="timestamp ts" data-iso="{{ item.scheduled_at.isoformat() }}"></span>
                                     <p>{{ item.text }}</p>
@@ -197,6 +199,7 @@
                             <div class="history-meta">
                                 <span class="timestamp ts" data-iso="{{ post.posted_at.isoformat() }}"></span>
                                 <span class="type-badge type-{{ post.type }}">{{ post.type }}</span>
+                                {% if post.has_media %}<span class="type-badge"><i class="fa-regular fa-image"></i> image</span>{% endif %}
                             </div>
                             <p>{{ post.text }}</p>
                         </div>

@@ -6,6 +6,8 @@ You paste tweets in `[square brackets]`, and Tweppy posts them one at a time on 
 
 ## Features
 
+- **AI Studio.** An OpenAI or Gemini model writes posts in your voice and makes images for them. You set the tone, topics, how often posts carry an image, and image presets (a category such as animals, humans or places, your own prompt, or both). Review drafts yourself, or turn on autopilot and it plans each day and picks the posting times.
+- **Replies.** Reads new mentions, drafts an answer in your voice or decides to skip, and can like the mentions it answers. Review each reply or let it send on its own, with a daily limit.
 - **Queue and auto-post.** Add many tweets at once, then post one every 30 minutes to 24 hours, in random or oldest-first order.
 - **Scheduler.** A month calendar, single scheduled posts, and bulk scheduling that spaces tweets out from a start time.
 - **Communities.** Queue posts for an X Community, optionally retweeting each one to your profile.
@@ -65,6 +67,29 @@ python start.py
 
 Open `http://127.0.0.1:5000`. If you set `ADMIN_TOKEN` in `.env`, open `http://127.0.0.1:5000/?admin_token=<your token>` once per browser; it sets a 30-day cookie.
 
+## AI Studio
+
+AI Studio is optional. Add `OPENAI_API_KEY`, `GEMINI_API_KEY`, or both to `.env`, restart, and open the **AI Studio** tab. [SETUP_NEEDED.md](SETUP_NEEDED.md) lists every key and permission and what to check first.
+
+- **Compose with AI** writes drafts from a short brief, or from your topics if you leave it empty. Nothing is posted until you approve a draft: schedule it at the suggested time, add it to the queue, or post it now.
+- **Voice** and **What and when** hold your preferences: tone, language, hashtags, things to avoid, your own instructions, text-only versus image posts and their mix, posts per day, and the hours posts may go out.
+- **Image presets** limit pictures to the kinds you want. While at least one preset is on, every image uses one.
+- **Autopilot** writes each day's posts once a day. By default they wait for your review; you can let it post without review.
+
+- **Communities.** Compose, your own drafts and autopilot can all target a saved X Community instead of your profile.
+- **Your own drafts and images.** Write a draft yourself and attach your own JPEG, PNG, WebP or GIF, or swap the image on any AI draft for one of yours.
+- **Learn from engagement.** Optionally reads your recent posts and their likes, reposts and replies once a day, then favours the hours and styles that did best.
+
+### Replies
+
+The **Replies** tab fetches mentions of your account on an interval you choose. For each one the text model drafts a reply or skips it (spam, abuse, complaints that need a person, anything it is unsure about). By default every reply waits for you; you can edit it, ask for a new draft, like the mention or skip it. Mentions are treated as untrusted text: the model is told never to follow instructions inside them.
+
+Reading mentions and post statistics are paid X API reads, so both are off until you turn them on.
+
+Images are stored in the database until their post goes out, then deleted. Posting images needs the `media.write` permission and liking needs `like.write`, so run `python authorize.py` again if you connected X before these features existed.
+
+Run the tests with `python -m pytest tests`.
+
 ## Configuration
 
 All settings live in `.env`. See `.env.example` for descriptions.
@@ -74,6 +99,7 @@ All settings live in `.env`. See `.env.example` for descriptions.
 | `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID`, `CF_API_TOKEN` | Recommended | Cloudflare D1 storage |
 | `CLIENT_ID`, `CLIENT_SECRET` | Yes | X OAuth 2.0 app credentials |
 | `REDIRECT_URI` | Yes | Must match the app's Callback URI exactly |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY` | For AI Studio | Text and image generation; one is enough |
 | `ADMIN_TOKEN` | On public hosts | Password for the dashboard |
 | `SECRET_KEY` | Recommended | Keeps dashboard sessions valid across restarts |
 

@@ -1,0 +1,516 @@
+<!-- AI Studio Tab -->
+<div id="ai-content" class="tab-content">
+    <header class="page-header">
+        <div>
+            <h1>AI Studio</h1>
+            <p class="page-subtitle">Let AI write posts and make images in your style. Review them here, or let autopilot run the day.</p>
+        </div>
+        <div id="ai-busy" class="ai-busy" {% if not ai.status.busy and not ai.status.pendingImages %}hidden{% endif %} role="status">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <span>{{ ai.status.busy or 'Making images' }}…</span>
+        </div>
+    </header>
+
+    {% if not ai.any_key %}
+    <div class="problem-banner" role="alert">
+        <i class="fa-solid fa-key"></i>
+        <div>
+            <strong>No AI key is set.</strong>
+            <span>Add <code>OPENAI_API_KEY</code> or <code>GEMINI_API_KEY</code> to the environment and restart Tweppy. See SETUP_NEEDED.md.</span>
+        </div>
+    </div>
+    {% elif ai.last_error %}
+    <div class="problem-banner" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div>
+            <strong>The last AI request failed.</strong>
+            <span>{{ ai.last_error }}</span>
+            {% if ai.last_error_at %}<span class="muted ts" data-iso="{{ ai.last_error_at.isoformat() }}"></span>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="status-strip">
+        <div class="status-tile">
+            <span class="status-label">Autopilot</span>
+            {% if ai.autopilot %}
+                <span class="status-value"><span class="dot online"></span> On</span>
+                <span class="status-sub">{{ ai.prefs.ai_posts_per_day }} a day · {{ 'you review first' if ai.review else 'posts without review' }}</span>
+            {% else %}
+                <span class="status-value"><span class="dot offline"></span> Off</span>
+                <span class="status-sub">You start each batch yourself</span>
+            {% endif %}
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Drafts to review</span>
+            <span class="status-value">{{ ai.drafts|length }}</span>
+            <span class="status-sub">{% if ai.last_run_at %}Last written <span class="ts" data-iso="{{ ai.last_run_at.isoformat() }}"></span>{% else %}Nothing written yet{% endif %}</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Text model</span>
+            <span class="status-value ai-model">{{ ai.text_model or 'None' }}</span>
+            <span class="status-sub">{{ ai.providers[ai.text_provider] if ai.text_provider else 'No key' }} · {{ ai.text_calls }} requests, about ${{ '%.2f'|format(ai.text_spend) }}</span>
+        </div>
+        <div class="status-tile">
+            <span class="status-label">Image model</span>
+            <span class="status-value ai-model">{{ ai.image_model or 'None' }}</span>
+            <span class="status-sub">{{ ai.providers[ai.image_provider] if ai.image_provider else 'No key' }} · {{ ai.image_calls }} images, about ${{ '%.2f'|format(ai.image_spend) }}</span>
+        </div>
+    </div>
+
+    <div class="dashboard-left-right-container ai-layout">
+        <div class="dashboard-left">
+            <div class="card">
+                <h2><i class="fa-solid fa-wand-magic-sparkles"></i> Compose with AI</h2>
+                <form action="{{ url_for('ai_compose') }}" method="POST" class="stacked-form">
+                    <label for="ai-brief">What should it write about? <span class="muted">(optional)</span></label>
+                    <textarea id="ai-brief" name="brief" rows="3" maxlength="2000" placeholder="Leave empty and it picks from your topics. Or: 'announce our weekend sale', 'three tips for new runners'…"></textarea>
+                    <div class="form-row form-row-3">
+                        <div>
+                            <label for="ai-count">How many</label>
+                            <input id="ai-count" type="number" name="count" min="1" max="{{ ai.max_compose }}" value="3" required>
+                        </div>
+                        <div>
+                            <label for="ai-format">Format</label>
+                            <select id="ai-format" name="format_mode">
+                                <option value="">My default: {{ ai.format_modes[ai.prefs.ai_format_mode] }}</option>
+                                <option value="text_only">Text only</option>
+                                <option value="image_only">Image + caption</option>
+                                <option value="auto">Let the AI decide</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="ai-preset">Image preset</label>
+                            <select id="ai-preset" name="preset_id">
+                                <option value="">{{ 'Any enabled preset' if ai.presets|selectattr('enabled')|list else 'None (AI chooses the picture)' }}</option>
+                                {% for preset in ai.presets %}
+                                <option value="{{ preset.id }}">{{ preset.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    {% if ai.communities %}
+                    <label for="ai-compose-destination">Post to</label>
+                    <select id="ai-compose-destination" name="community_id">
+                        <option value="">My profile</option>
+                        {% for community in ai.communities %}<option value="{{ community.id }}">Community: {{ community.name }}</option>{% endfor %}
+                    </select>
+                    {% endif %}
+                    <label class="toggle">
+                        <input type="checkbox" name="with_times" value="1" checked>
+                        <span>Suggest a posting time for each one</span>
+                    </label>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" {% if not ai.any_key %}disabled{% endif %}><i class="fa-solid fa-wand-magic-sparkles"></i> Write drafts</button>
+                    </div>
+                </form>
+                <p class="hint">Nothing is posted from here. Drafts land below for you to review. Each image costs more than a text request.</p>
+
+                <details class="own-draft">
+                    <summary>Or write a draft yourself, with your own image</summary>
+                    <form action="{{ url_for('ai_draft_new') }}" method="POST" enctype="multipart/form-data" class="stacked-form js-utc-form">
+                        <label for="own-text">Post</label>
+                        <textarea id="own-text" name="text" rows="3" required data-preview="own-preview" data-single="1"></textarea>
+                        <div id="own-preview" class="tweet-preview"></div>
+                        <div class="form-row">
+                            <div>
+                                <label for="own-image">Image <span class="muted">(optional; JPEG, PNG, WebP or GIF)</span></label>
+                                <input id="own-image" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif">
+                            </div>
+                            <div>
+                                <label for="own-at">Post at <span class="muted">(optional)</span></label>
+                                <input id="own-at" name="suggested_at" type="datetime-local" data-utc-target="own-at-utc">
+                                <input type="hidden" id="own-at-utc" name="suggested_at_utc">
+                            </div>
+                        </div>
+                        {% if ai.communities %}
+                        <label for="own-destination">Post to</label>
+                        <select id="own-destination" name="community_id">
+                            <option value="">My profile</option>
+                            {% for community in ai.communities %}<option value="{{ community.id }}">Community: {{ community.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-plus"></i> Add draft</button>
+                        </div>
+                    </form>
+                </details>
+            </div>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-inbox"></i> Drafts ({{ ai.drafts|length }})</h2>
+                    {% if ai.drafts %}
+                    <div class="header-actions">
+                        <form action="{{ url_for('ai_drafts_approve_all') }}" method="POST" onsubmit="return confirm('Approve every draft? Each goes to its suggested time, or to the queue if it has none.');">
+                            <button type="submit" class="btn btn-success btn-small"><i class="fa-solid fa-check-double"></i> Approve all</button>
+                        </form>
+                        <form action="{{ url_for('ai_drafts_clear') }}" method="POST" onsubmit="return confirm('Discard every draft?');">
+                            <button type="submit" class="btn btn-ghost-danger btn-small">Discard all</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="draft-list">
+                    {% for draft in ai.drafts %}
+                    <article class="draft">
+                        {% if draft.wants_image %}
+                        <div class="draft-image">
+                            {% if draft.image_status == 'ready' and draft.media_id %}
+                                <a href="{{ url_for('ai_media', media_id=draft.media_id) }}" target="_blank" rel="noopener"><img src="{{ url_for('ai_media', media_id=draft.media_id) }}" alt="{{ draft.image_prompt }}" loading="lazy"></a>
+                            {% elif draft.image_status == 'pending' %}
+                                <div class="draft-image-placeholder"><i class="fa-solid fa-spinner fa-spin"></i><span>Making image</span></div>
+                            {% else %}
+                                <div class="draft-image-placeholder failed"><i class="fa-solid fa-image"></i><span>Image failed</span></div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        <div class="draft-body">
+                            <div class="tweet-meta">
+                                {% if draft.suggested_at %}
+                                    <span class="type-badge type-upcoming"><i class="fa-regular fa-clock"></i> <span class="ts" data-iso="{{ draft.suggested_at.isoformat() }}"></span></span>
+                                {% else %}
+                                    <span class="type-badge">No time · goes to queue</span>
+                                {% endif %}
+                                <span class="type-badge">{{ 'Image + caption' if draft.wants_image else 'Text' }}</span>
+                                {% if draft.preset_name %}<span class="type-badge">{{ draft.preset_name }}</span>{% endif %}
+                                {% if draft.community_name %}<span class="type-badge type-community"><i class="fa-solid fa-users"></i> {{ draft.community_name }}</span>{% endif %}
+                                {% if draft.origin == 'autopilot' %}<span class="type-badge">Autopilot</span>{% endif %}
+                                {% if draft.origin == 'own' %}<span class="type-badge">Written by you</span>{% endif %}
+                                <span class="count {% if draft.length > 280 %}over{% endif %}">{{ draft.length }}/280</span>
+                            </div>
+                            <p class="draft-text">{{ draft.text }}</p>
+                            {% if draft.reason %}<p class="draft-reason"><i class="fa-regular fa-lightbulb"></i> {{ draft.reason }}</p>{% endif %}
+                            {% if draft.image_status == 'failed' %}<p class="error-text">{{ draft.image_error }}</p>{% endif %}
+
+                            <div class="action-row draft-actions">
+                                {% set blocked = draft.image_status in ('pending', 'failed') %}
+                                <form action="{{ url_for('ai_draft_approve', draft_id=draft.id) }}" method="POST">
+                                    <input type="hidden" name="how" value="schedule">
+                                    <button type="submit" class="btn btn-primary btn-small" {% if blocked %}disabled{% endif %}><i class="fa-regular fa-clock"></i> Schedule</button>
+                                </form>
+                                <form action="{{ url_for('ai_draft_approve', draft_id=draft.id) }}" method="POST">
+                                    <input type="hidden" name="how" value="queue">
+                                    <button type="submit" class="btn btn-secondary btn-small" {% if blocked %}disabled{% endif %}><i class="fa-solid fa-plus"></i> Queue</button>
+                                </form>
+                                <form action="{{ url_for('ai_draft_approve', draft_id=draft.id) }}" method="POST" onsubmit="return confirm('Post this to X right now?');">
+                                    <input type="hidden" name="how" value="now">
+                                    <button type="submit" class="btn btn-secondary btn-small" {% if blocked %}disabled{% endif %}><i class="fa-solid fa-paper-plane"></i> Post now</button>
+                                </form>
+                                <button type="button" class="btn btn-secondary btn-small js-edit-draft"
+                                        data-action="{{ url_for('ai_draft_update', draft_id=draft.id) }}"
+                                        data-text="{{ draft.text }}"
+                                        data-iso="{{ draft.suggested_at.isoformat() if draft.suggested_at else '' }}"><i class="fa-solid fa-pencil"></i> Edit</button>
+                                <button type="button" class="btn btn-secondary btn-small js-draft-image"
+                                        data-action="{{ url_for('ai_draft_image', draft_id=draft.id) }}"
+                                        data-upload="{{ url_for('ai_draft_upload', draft_id=draft.id) }}"
+                                        data-prompt="{{ draft.image_prompt }}"
+                                        data-preset="{{ draft.preset_id or '' }}"
+                                        data-has-image="{{ '1' if draft.wants_image else '' }}"
+                                        {% if draft.image_status == 'pending' %}disabled{% endif %}><i class="fa-regular fa-image"></i> {{ 'Redo image' if draft.wants_image else 'Add image' }}</button>
+                                <form action="{{ url_for('ai_draft_delete', draft_id=draft.id) }}" method="POST">
+                                    <button type="submit" class="btn btn-ghost-danger btn-small btn-icon" title="Discard draft" aria-label="Discard draft"><i class="fa-solid fa-trash"></i></button>
+                                </form>
+                            </div>
+                        </div>
+                    </article>
+                    {% else %}
+                    <p class="empty-message">No drafts yet. Write some above{% if not ai.autopilot %}, or turn on autopilot{% endif %}.</p>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-images"></i> Image presets</h2>
+                <p class="hint">Presets decide what kind of pictures get made. Use a category, your own prompt, or both. While at least one preset is on, every image uses one of them. With none on, the AI picks a picture that suits each post.</p>
+
+                <div class="preset-list">
+                    {% for preset in ai.presets %}
+                    <div class="preset {% if not preset.enabled %}preset-off{% endif %}">
+                        <div class="preset-body">
+                            <strong>{{ preset.name }}</strong>
+                            {% if preset.category %}<span class="type-badge">{{ ai.categories[preset.category] }}</span>{% endif %}
+                            {% if not preset.enabled %}<span class="type-badge">Off</span>{% endif %}
+                            {% if preset.prompt %}<p class="muted">{{ preset.prompt }}</p>{% endif %}
+                        </div>
+                        <div class="header-actions">
+                            <form action="{{ url_for('ai_preset_toggle', preset_id=preset.id) }}" method="POST">
+                                <button type="submit" class="btn btn-secondary btn-small">{{ 'Turn off' if preset.enabled else 'Turn on' }}</button>
+                            </form>
+                            <button type="button" class="btn btn-secondary btn-small btn-icon js-edit-preset" title="Edit preset" aria-label="Edit preset"
+                                    data-id="{{ preset.id }}" data-name="{{ preset.name }}" data-category="{{ preset.category }}" data-prompt="{{ preset.prompt }}"><i class="fa-solid fa-pencil"></i></button>
+                            <form action="{{ url_for('ai_preset_delete', preset_id=preset.id) }}" method="POST" onsubmit="return confirm('Remove this preset?');">
+                                <button type="submit" class="btn btn-ghost-danger btn-small btn-icon" title="Remove preset" aria-label="Remove preset"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="empty-message">No presets yet.</p>
+                    {% endfor %}
+                </div>
+
+                <form id="preset-form" action="{{ url_for('ai_preset_save') }}" method="POST" class="stacked-form preset-form">
+                    <input type="hidden" name="preset_id" id="preset-id" value="">
+                    <h3 id="preset-form-title">Add a preset</h3>
+                    <div class="form-row">
+                        <div>
+                            <label for="preset-name">Name</label>
+                            <input id="preset-name" name="name" maxlength="80" placeholder="e.g. Moody city nights">
+                        </div>
+                        <div>
+                            <label for="preset-category">Category</label>
+                            <select id="preset-category" name="category">
+                                <option value="">None (prompt only)</option>
+                                {% for key, label in ai.categories.items() %}
+                                <option value="{{ key }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <label for="preset-prompt">How should these images look? <span class="muted">(optional with a category)</span></label>
+                    <textarea id="preset-prompt" name="prompt" rows="3" maxlength="2000" placeholder="e.g. 35mm film photo, golden hour, shallow depth of field, warm muted colours"></textarea>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="preset-cancel" hidden>Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="preset-submit"><i class="fa-solid fa-plus"></i> Add preset</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="dashboard-right">
+            <div class="card">
+                <h2><i class="fa-solid fa-robot"></i> Autopilot</h2>
+                <p class="hint">Once a day, autopilot writes that day's posts ({{ ai.prefs.ai_posts_per_day }} a day, timing: {{ ai.timing_modes[ai.prefs.ai_timing_mode] }}).
+                {% if ai.review %}They wait in Drafts until you approve them.{% else %}<strong>They are scheduled and posted without review.</strong>{% endif %}</p>
+                <div class="action-row">
+                    <form action="{{ url_for('ai_autopilot') }}" method="POST">
+                        {% if ai.autopilot %}
+                        <input type="hidden" name="enabled" value="0">
+                        <button type="submit" class="btn btn-warning"><i class="fa-solid fa-pause"></i> Turn autopilot off</button>
+                        {% else %}
+                        <input type="hidden" name="enabled" value="1">
+                        <button type="submit" class="btn btn-success" {% if not ai.any_key %}disabled{% endif %}><i class="fa-solid fa-play"></i> Turn autopilot on</button>
+                        {% endif %}
+                    </form>
+                    <form action="{{ url_for('ai_plan_now') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary" {% if not ai.any_key %}disabled{% endif %}
+                                title="Write {{ ai.next_plan_count }} post(s) for {{ ai.next_plan_day }} now"><i class="fa-solid fa-calendar-plus"></i> Plan {{ ai.next_plan_count }} now</button>
+                    </form>
+                </div>
+                <dl class="breakdown ai-breakdown">
+                    <div><dt>Last planned day</dt><dd>{{ ai.planned_for or 'Never' }}</dd></div>
+                    <div><dt>Next day to plan</dt><dd>{{ ai.next_plan_day }}</dd></div>
+                </dl>
+            </div>
+
+            <form action="{{ url_for('ai_save_settings') }}" method="POST" class="settings-form">
+                <div class="card">
+                    <h2><i class="fa-solid fa-feather"></i> Voice</h2>
+                    <div class="stacked-form">
+                        <label for="ai-persona">Who is this account, and who reads it?</label>
+                        <textarea id="ai-persona" name="ai_persona" rows="3" maxlength="2000" placeholder="e.g. A small coffee roaster in Lagos. Followers are home brewers and café owners.">{{ ai.prefs.ai_persona }}</textarea>
+                        <label for="ai-topics">Topics to post about</label>
+                        <textarea id="ai-topics" name="ai_topics" rows="2" maxlength="2000" placeholder="e.g. brewing tips, bean origins, behind the scenes, customer stories">{{ ai.prefs.ai_topics }}</textarea>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-tone">Tone</label>
+                                <select id="ai-tone" name="ai_tone">
+                                    {% for tone in ai.tones %}<option value="{{ tone }}" {% if tone == ai.prefs.ai_tone %}selected{% endif %}>{{ tone|capitalize }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ai-language">Language</label>
+                                <input id="ai-language" name="ai_language" maxlength="60" value="{{ ai.prefs.ai_language }}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-hashtags">Hashtags</label>
+                                <select id="ai-hashtags" name="ai_hashtags">
+                                    {% for key, label in ai.hashtag_modes.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_hashtags %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ai-emoji">Emoji</label>
+                                <select id="ai-emoji" name="ai_emoji">
+                                    {% for key, label in ai.emoji_modes.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_emoji %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <label for="ai-max-chars">Longest post (characters)</label>
+                        <input id="ai-max-chars" type="number" name="ai_max_chars" min="50" max="280" value="{{ ai.prefs.ai_max_chars }}" required>
+                        <label for="ai-avoid">Never mention or do</label>
+                        <textarea id="ai-avoid" name="ai_avoid" rows="2" maxlength="2000" placeholder="e.g. politics, competitors by name, prices">{{ ai.prefs.ai_avoid }}</textarea>
+                        <label for="ai-instructions">Your own instructions <span class="muted">(custom system prompt)</span></label>
+                        <textarea id="ai-instructions" name="ai_instructions" rows="3" maxlength="2000" placeholder="Anything else the writer should always follow.">{{ ai.prefs.ai_instructions }}</textarea>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fa-solid fa-shuffle"></i> What and when</h2>
+                    <div class="stacked-form">
+                        <label for="ai-format-mode">Post format</label>
+                        <select id="ai-format-mode" name="ai_format_mode">
+                            {% for key, label in ai.format_modes.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_format_mode %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                        <label for="ai-image-ratio">Share of posts with an image, for Mix (%)</label>
+                        <input id="ai-image-ratio" type="number" name="ai_image_ratio" min="0" max="100" step="5" value="{{ ai.prefs.ai_image_ratio }}" required>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-per-day">Posts per day</label>
+                                <input id="ai-per-day" type="number" name="ai_posts_per_day" min="1" max="{{ ai.max_per_day }}" value="{{ ai.prefs.ai_posts_per_day }}" required>
+                            </div>
+                            <div>
+                                <label for="ai-timing">Timing</label>
+                                <select id="ai-timing" name="ai_timing_mode">
+                                    {% for key, label in ai.timing_modes.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_timing_mode %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-window-start">Post no earlier than</label>
+                                <input id="ai-window-start" type="time" name="ai_window_start" value="{{ ai.prefs.ai_window_start }}" required>
+                            </div>
+                            <div>
+                                <label for="ai-window-end">And no later than</label>
+                                <input id="ai-window-end" type="time" name="ai_window_end" value="{{ ai.prefs.ai_window_end }}" required>
+                            </div>
+                        </div>
+                        {% if ai.communities %}
+                        <label for="ai-destination">Autopilot posts to</label>
+                        <select id="ai-destination" name="ai_destination">
+                            <option value="">My profile</option>
+                            {% for community in ai.communities %}<option value="{{ community.id }}" {% if community.id == ai.prefs.ai_destination %}selected{% endif %}>Community: {{ community.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
+                        <label class="toggle">
+                            <input type="checkbox" name="ai_learn_timing" value="1" {% if ai.prefs.ai_learn_timing == '1' %}checked{% endif %}>
+                            <span>Learn from my posts' engagement</span>
+                        </label>
+                        <p class="hint">Once a day, reads your recent posts and their likes, reposts and replies from X (one paid read), then favours the hours and styles that did best.</p>
+                        <p class="hint">Times use the timezone in Settings ({{ settings.timezone }}). Without engagement learning, the AI chooses times from what it knows about your audience in general.</p>
+                        <label class="toggle">
+                            <input type="checkbox" name="ai_require_approval" value="1" {% if ai.review %}checked{% endif %}>
+                            <span>Review autopilot posts before they go out</span>
+                        </label>
+                        <p class="hint">With this off, autopilot schedules and posts on its own. A post whose image failed always waits for you.</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fa-solid fa-microchip"></i> Models</h2>
+                    <div class="stacked-form">
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-text-provider">Writes the text</label>
+                                <select id="ai-text-provider" name="ai_text_provider">
+                                    {% for key, label in ai.providers.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_text_provider %}selected{% endif %}>{{ label }}{% if not ai.have_keys[key] %} (no key){% endif %}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ai-text-model">Text model</label>
+                                <input id="ai-text-model" name="ai_text_model" list="ai-text-models" maxlength="100" value="{{ ai.prefs.ai_text_model }}" placeholder="Default: {{ ai.text_model }}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-image-provider">Makes the images</label>
+                                <select id="ai-image-provider" name="ai_image_provider">
+                                    {% for key, label in ai.providers.items() %}<option value="{{ key }}" {% if key == ai.prefs.ai_image_provider %}selected{% endif %}>{{ label }}{% if not ai.have_keys[key] %} (no key){% endif %}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ai-image-model">Image model</label>
+                                <input id="ai-image-model" name="ai_image_model" list="ai-image-models" maxlength="100" value="{{ ai.prefs.ai_image_model }}" placeholder="Default: {{ ai.image_model }}">
+                            </div>
+                        </div>
+                        <datalist id="ai-text-models">{% for model in ai.models.text %}<option value="{{ model }}">{% endfor %}</datalist>
+                        <datalist id="ai-image-models">{% for model in ai.models.image %}<option value="{{ model }}">{% endfor %}</datalist>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-image-aspect">Image shape</label>
+                                <select id="ai-image-aspect" name="ai_image_aspect">
+                                    {% for aspect in ai.aspects %}<option value="{{ aspect }}" {% if aspect == ai.prefs.ai_image_aspect %}selected{% endif %}>{{ aspect|capitalize }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ai-image-quality">Image quality <span class="muted">(OpenAI)</span></label>
+                                <select id="ai-image-quality" name="ai_image_quality">
+                                    {% for quality in ai.qualities %}<option value="{{ quality }}" {% if quality == ai.prefs.ai_image_quality %}selected{% endif %}>{{ quality|capitalize }}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <label for="ai-image-style">Style applied to every image</label>
+                        <textarea id="ai-image-style" name="ai_image_style" rows="2" maxlength="2000">{{ ai.prefs.ai_image_style }}</textarea>
+                        <div class="form-row">
+                            <div>
+                                <label for="ai-cost-text">Cost per text request (USD)</label>
+                                <input id="ai-cost-text" type="number" name="ai_cost_text" min="0" max="100" step="0.0001" value="{{ ai.prefs.ai_cost_text }}" required>
+                            </div>
+                            <div>
+                                <label for="ai-cost-image">Cost per image (USD)</label>
+                                <input id="ai-cost-image" type="number" name="ai_cost_image" min="0" max="100" step="0.0001" value="{{ ai.prefs.ai_cost_image }}" required>
+                            </div>
+                        </div>
+                        <p class="hint">The two costs are your own estimates, used only for the spend shown at the top. Check your provider's price list.</p>
+                        <p class="hint">Leave a model empty to use the default. If the key is missing for the provider you pick, the other one is used.</p>
+                    </div>
+                </div>
+
+                <div class="settings-save">
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save AI preferences</button>
+                </div>
+            </form>
+
+            <div class="card">
+                <div class="card-title-row">
+                    <h2><i class="fa-solid fa-chart-line"></i> What works for you</h2>
+                    <form action="{{ url_for('engage_insights') }}" method="POST">
+                        <button type="submit" class="btn btn-secondary btn-small" title="One paid read from X"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                    </form>
+                </div>
+                {% if engage.prefs.ai_insights_error %}<p class="error-text">{{ engage.prefs.ai_insights_error }}</p>{% endif %}
+                {% if ai.insights and ai.insights.posts %}
+                <dl class="breakdown">
+                    <div><dt>Posts read</dt><dd>{{ ai.insights.posts }}</dd></div>
+                    <div><dt>Best hours</dt><dd>{% if ai.insights.best_hours %}{% for hour in ai.insights.best_hours %}{{ '%02d:00'|format(hour) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}<span class="muted">Not clear yet</span>{% endif %}</dd></div>
+                    <div><dt>Updated</dt><dd>{% if ai.insights.updated_at %}<span class="ts" data-iso="{{ ai.insights.updated_at.isoformat() }}"></span>{% endif %}</dd></div>
+                </dl>
+                {% if ai.insights.posts < 10 %}<p class="hint">Fewer than 10 posts so far, so this is not used yet.</p>{% endif %}
+                {% if ai.insights.top %}
+                <p class="hint">Posts that did best:</p>
+                <ul class="top-posts">{% for text in ai.insights.top %}<li>{{ text }}</li>{% endfor %}</ul>
+                {% endif %}
+                {% else %}
+                <p class="hint">Nothing read yet. Turn on "Learn from my posts' engagement" above, or press Refresh.</p>
+                {% endif %}
+            </div>
+
+            <div class="card">
+                <h2><i class="fa-solid fa-list-check"></i> Setup checklist</h2>
+                <dl class="breakdown">
+                    {% for key, label in ai.providers.items() %}
+                    <div>
+                        <dt>{{ label }} key</dt>
+                        <dd>
+                            {% if ai.have_keys[key] %}
+                            <form action="{{ url_for('ai_test', provider=key) }}" method="POST" class="inline-form">
+                                <span>Set</span>
+                                <button type="submit" class="btn btn-secondary btn-small">Check connection</button>
+                            </form>
+                            {% else %}<span class="muted">Missing</span>{% endif %}
+                        </dd>
+                    </div>
+                    {% endfor %}
+                    <div>
+                        <dt>X image posting</dt>
+                        <dd>{% if ai.x_media_upload == 'ok' %}Working{% elif ai.x_media_upload == 'failed' %}<span class="error-text">Refused. Run authorize.py again</span>{% else %}<span class="muted">Not tried yet</span>{% endif %}</dd>
+                    </div>
+                </dl>
+                <p class="hint">Posting images needs the <code>media.write</code> permission, and liking mentions needs <code>like.write</code>. If you connected X before these features existed, run <code>authorize.py</code> once more.</p>
+            </div>
+        </div>
+    </div>
+</div>

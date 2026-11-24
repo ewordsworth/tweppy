@@ -131,6 +131,7 @@
                     <div class="card-content tweet-queue-container">
                         {% for tweet in community_queue %}
                         <div class="tweet-item">
+                            {% if tweet.media_id %}<a class="thumb" href="{{ url_for('ai_media', media_id=tweet.media_id) }}" target="_blank" rel="noopener"><img src="{{ url_for('ai_media', media_id=tweet.media_id) }}" alt="Image attached to this post" loading="lazy"></a>{% endif %}
                             <div class="tweet-body">
                                 <p>{{ tweet.text }}</p>
                                 <span class="tweet-meta js-char-count"></span>
